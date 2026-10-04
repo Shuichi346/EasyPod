@@ -1,0 +1,4 @@
+module CAudioPluginHost {
+  header "../../Native/AudioPluginHost/AudioPluginHost.h"
+  export *
+}

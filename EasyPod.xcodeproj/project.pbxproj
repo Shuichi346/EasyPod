@@ -1,0 +1,744 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		01D42246DD878E2C8F983ADA /* PluginCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2326E2A5B8972D8B50CFB9A8 /* PluginCatalogTests.swift */; };
+		087FD7CABD052E90FC229F42 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD662615456B71146656DE05 /* Theme.swift */; };
+		19C92ECD2A9E648BA7ACAE3D /* AudioCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75A570C4001A527527079EC5 /* AudioCaptureService.swift */; };
+		255D1CB92D8F000A4DA29982 /* PlaybackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50A73E14E57A8FD42874202 /* PlaybackService.swift */; };
+		25C2056D6A49016483048D30 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EDBBE35853BF995E8FC7CB3 /* ContentView.swift */; };
+		297914F9B5BABC584B8C3352 /* RecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E187D8D2CAF3F3358EA4822 /* RecordingSession.swift */; };
+		2A81AA7F4B88A2CF94E6B6F6 /* WaveformService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19A92517D4B609004F71BB16 /* WaveformService.swift */; };
+		3273F59E95E4C209BE693DF9 /* PreferencesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFD2EF416B553DFC9F4641E /* PreferencesStore.swift */; };
+		3576E2F03414C8CBB76703DA /* UserPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F9FDF823C09430E607F9617 /* UserPath.swift */; };
+		39856F24ED471B5090F329E3 /* japanese-speech.aiff in Resources */ = {isa = PBXBuildFile; fileRef = B7E77D45B4CD78927B5798AC /* japanese-speech.aiff */; };
+		3B7044DFE41A172ED9C03BD8 /* RecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D41E7B6F2FE3E1A704575C89 /* RecorderView.swift */; };
+		49ED07D6EC182A24E59FEFA0 /* QualityControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7072AD12D31A660644823F7B /* QualityControls.swift */; };
+		66C572F57AF1CB06FD6657D2 /* TranscriptionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47942069AA1EF0176102F3B0 /* TranscriptionTests.swift */; };
+		6D1D598FDF0B0EF0D49FE600 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B10B8E9D2DD5FDB33AD2EC /* SidebarView.swift */; };
+		74EFC698E31B71B5A730B18D /* AudioDeviceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6291FFECED36B2976B3D0FE /* AudioDeviceService.swift */; };
+		767171B0953D64FA4C3FC32E /* EffectRackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86A9149C6F245B6486CB2C15 /* EffectRackView.swift */; };
+		791B4A47A4371F31BF47377F /* EasyPodApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D5F357999572C880C36F228 /* EasyPodApp.swift */; };
+		7EBAB4FD839275376035E26D /* SessionFileService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51BD2D81516BD083D6639042 /* SessionFileService.swift */; };
+		8A1493931C0C31438289C210 /* TranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF4181F037EDB51AE34996C9 /* TranscriptionService.swift */; };
+		8FF0A7C659C050A2C453B157 /* PluginEditorService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76A6CC2FEE76121CF37D9B4E /* PluginEditorService.swift */; };
+		9D65D0BF980B86CDC0E5EC84 /* TranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73256C742BF11AA01A727091 /* TranscriptView.swift */; };
+		9DEAF4B0419308159E1DCB72 /* RecordingSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DB37543CB8A5DD0C116EBBB /* RecordingSettings.swift */; };
+		A0CBE95C25F28A513EE83D94 /* RecordingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DB9625C8D70EA79AA0D5B60 /* RecordingStore.swift */; };
+		A9B3113D2612E4C8463ED31D /* WaveformView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 676FBA1297F59B05712FF88C /* WaveformView.swift */; };
+		AA5D97265F8D363855D18040 /* PluginCatalogService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D2A9259FEE9FD17F1F16290 /* PluginCatalogService.swift */; };
+		AB394F08B9C492EF0A0DE24E /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F5545787B8F1F03AB118669F /* AudioToolbox.framework */; };
+		C9640B50369A5F07A0A8B9DE /* AudioCaptureRing.cpp in Sources */ = {isa = PBXBuildFile; fileRef = EC33CC1EF41AB364B7B22BE5 /* AudioCaptureRing.cpp */; };
+		CD33C43B90955536F2B8C899 /* AudioExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F2BED27A51D766E468BF7C0 /* AudioExportService.swift */; };
+		CDBE90239C744603E4659769 /* PipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90F4DCABBA20A53B1B3CEDB3 /* PipelineTests.swift */; };
+		D625F4DDE1274A53BDE67C7C /* ExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82FCFCF5A2741ED454D66936 /* ExportSheet.swift */; };
+		DDDFC5B84A7DFB7B154B0217 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7F3E65AD1A566F3D107B08F6 /* CoreAudio.framework */; };
+		E20CF83113A13F8869131BE6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A1AC8BC1A2DB4F0E759A28B /* SettingsView.swift */; };
+		E75984187A3778DAB5649921 /* EffectSlot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ADB738B7DAC1D041CE43FA9 /* EffectSlot.swift */; };
+		EFFFE98F56BE050BE6999CB6 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3C44C16169C0A5BEA1A5071A /* AVFoundation.framework */; };
+		F94F8F8B23FEDDD6988C8972 /* EffectChainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4810CDA8F11E4F7811C6956 /* EffectChainService.swift */; };
+		FBA039D5A68AC83C226AF7A4 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DCEB81D0FF7C9897EAD6BC8B /* Cocoa.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		8CFD08021A8F0FA3FBA53927 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 37A29C78675EA7CF5E65A434 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 10F7154D7D37693DAB49DC01;
+			remoteInfo = EasyPod;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		19A92517D4B609004F71BB16 /* WaveformService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformService.swift; sourceTree = "<group>"; };
+		1DB9625C8D70EA79AA0D5B60 /* RecordingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingStore.swift; sourceTree = "<group>"; };
+		1E097FC987F79788DAEA16AF /* EasyPod.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = EasyPod.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		220BEB51CB5F8E18D13E5FD1 /* EasyPod-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "EasyPod-Bridging-Header.h"; sourceTree = "<group>"; };
+		2326E2A5B8972D8B50CFB9A8 /* PluginCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginCatalogTests.swift; sourceTree = "<group>"; };
+		2A1AC8BC1A2DB4F0E759A28B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		2D5F357999572C880C36F228 /* EasyPodApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EasyPodApp.swift; sourceTree = "<group>"; };
+		3ADB738B7DAC1D041CE43FA9 /* EffectSlot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EffectSlot.swift; sourceTree = "<group>"; };
+		3C44C16169C0A5BEA1A5071A /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		3D2A9259FEE9FD17F1F16290 /* PluginCatalogService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginCatalogService.swift; sourceTree = "<group>"; };
+		3E187D8D2CAF3F3358EA4822 /* RecordingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSession.swift; sourceTree = "<group>"; };
+		47942069AA1EF0176102F3B0 /* TranscriptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionTests.swift; sourceTree = "<group>"; };
+		51BD2D81516BD083D6639042 /* SessionFileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionFileService.swift; sourceTree = "<group>"; };
+		5EFD2EF416B553DFC9F4641E /* PreferencesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesStore.swift; sourceTree = "<group>"; };
+		5F2BED27A51D766E468BF7C0 /* AudioExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioExportService.swift; sourceTree = "<group>"; };
+		676FBA1297F59B05712FF88C /* WaveformView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaveformView.swift; sourceTree = "<group>"; };
+		6EDBBE35853BF995E8FC7CB3 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		7072AD12D31A660644823F7B /* QualityControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QualityControls.swift; sourceTree = "<group>"; };
+		73256C742BF11AA01A727091 /* TranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptView.swift; sourceTree = "<group>"; };
+		75A570C4001A527527079EC5 /* AudioCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCaptureService.swift; sourceTree = "<group>"; };
+		76A6CC2FEE76121CF37D9B4E /* PluginEditorService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginEditorService.swift; sourceTree = "<group>"; };
+		7F3E65AD1A566F3D107B08F6 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
+		7F9FDF823C09430E607F9617 /* UserPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserPath.swift; sourceTree = "<group>"; };
+		82FCFCF5A2741ED454D66936 /* ExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportSheet.swift; sourceTree = "<group>"; };
+		86A9149C6F245B6486CB2C15 /* EffectRackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EffectRackView.swift; sourceTree = "<group>"; };
+		8DB37543CB8A5DD0C116EBBB /* RecordingSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSettings.swift; sourceTree = "<group>"; };
+		90F4DCABBA20A53B1B3CEDB3 /* PipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineTests.swift; sourceTree = "<group>"; };
+		AF4181F037EDB51AE34996C9 /* TranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionService.swift; sourceTree = "<group>"; };
+		B50A73E14E57A8FD42874202 /* PlaybackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackService.swift; sourceTree = "<group>"; };
+		B7E77D45B4CD78927B5798AC /* japanese-speech.aiff */ = {isa = PBXFileReference; lastKnownFileType = audio.aiff; path = "japanese-speech.aiff"; sourceTree = "<group>"; };
+		BD662615456B71146656DE05 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		D41E7B6F2FE3E1A704575C89 /* RecorderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecorderView.swift; sourceTree = "<group>"; };
+		D5DA8383529A371884265B5F /* EasyPodTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = EasyPodTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D6B10B8E9D2DD5FDB33AD2EC /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		DCEB81D0FF7C9897EAD6BC8B /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = System/Library/Frameworks/Cocoa.framework; sourceTree = SDKROOT; };
+		DE4CF1715011616124064DBB /* AudioCaptureRing.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AudioCaptureRing.h; sourceTree = "<group>"; };
+		E6291FFECED36B2976B3D0FE /* AudioDeviceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDeviceService.swift; sourceTree = "<group>"; };
+		EC33CC1EF41AB364B7B22BE5 /* AudioCaptureRing.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = AudioCaptureRing.cpp; sourceTree = "<group>"; };
+		F4810CDA8F11E4F7811C6956 /* EffectChainService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EffectChainService.swift; sourceTree = "<group>"; };
+		F5545787B8F1F03AB118669F /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		15D3DEA11C6534A99A1079E6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EFFFE98F56BE050BE6999CB6 /* AVFoundation.framework in Frameworks */,
+				AB394F08B9C492EF0A0DE24E /* AudioToolbox.framework in Frameworks */,
+				DDDFC5B84A7DFB7B154B0217 /* CoreAudio.framework in Frameworks */,
+				FBA039D5A68AC83C226AF7A4 /* Cocoa.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		06001088741BC8F1D61ED8E5 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				6EDBBE35853BF995E8FC7CB3 /* ContentView.swift */,
+				86A9149C6F245B6486CB2C15 /* EffectRackView.swift */,
+				82FCFCF5A2741ED454D66936 /* ExportSheet.swift */,
+				7072AD12D31A660644823F7B /* QualityControls.swift */,
+				D41E7B6F2FE3E1A704575C89 /* RecorderView.swift */,
+				2A1AC8BC1A2DB4F0E759A28B /* SettingsView.swift */,
+				D6B10B8E9D2DD5FDB33AD2EC /* SidebarView.swift */,
+				73256C742BF11AA01A727091 /* TranscriptView.swift */,
+				676FBA1297F59B05712FF88C /* WaveformView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		0E1D6756D977BF3E1ACDB0AC /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				75A570C4001A527527079EC5 /* AudioCaptureService.swift */,
+				E6291FFECED36B2976B3D0FE /* AudioDeviceService.swift */,
+				5F2BED27A51D766E468BF7C0 /* AudioExportService.swift */,
+				F4810CDA8F11E4F7811C6956 /* EffectChainService.swift */,
+				B50A73E14E57A8FD42874202 /* PlaybackService.swift */,
+				3D2A9259FEE9FD17F1F16290 /* PluginCatalogService.swift */,
+				76A6CC2FEE76121CF37D9B4E /* PluginEditorService.swift */,
+				51BD2D81516BD083D6639042 /* SessionFileService.swift */,
+				AF4181F037EDB51AE34996C9 /* TranscriptionService.swift */,
+				19A92517D4B609004F71BB16 /* WaveformService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		22D71AD2D5950C37A1062B55 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				F5545787B8F1F03AB118669F /* AudioToolbox.framework */,
+				3C44C16169C0A5BEA1A5071A /* AVFoundation.framework */,
+				DCEB81D0FF7C9897EAD6BC8B /* Cocoa.framework */,
+				7F3E65AD1A566F3D107B08F6 /* CoreAudio.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		29F8CE3C978985EF8C0C40CF /* Stores */ = {
+			isa = PBXGroup;
+			children = (
+				5EFD2EF416B553DFC9F4641E /* PreferencesStore.swift */,
+				1DB9625C8D70EA79AA0D5B60 /* RecordingStore.swift */,
+			);
+			path = Stores;
+			sourceTree = "<group>";
+		};
+		40F7E64F7A380926C9D8BB6A /* Native */ = {
+			isa = PBXGroup;
+			children = (
+				BA6C185BC3BAA3AF5F37AF58 /* AudioCapture */,
+			);
+			path = Native;
+			sourceTree = "<group>";
+		};
+		46447A58561F86E7E9D3501C /* EasyPodTests */ = {
+			isa = PBXGroup;
+			children = (
+				B7E77D45B4CD78927B5798AC /* japanese-speech.aiff */,
+				90F4DCABBA20A53B1B3CEDB3 /* PipelineTests.swift */,
+				2326E2A5B8972D8B50CFB9A8 /* PluginCatalogTests.swift */,
+				47942069AA1EF0176102F3B0 /* TranscriptionTests.swift */,
+			);
+			path = EasyPodTests;
+			sourceTree = "<group>";
+		};
+		5664EB11D1B86DAD3EE3D305 /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				220BEB51CB5F8E18D13E5FD1 /* EasyPod-Bridging-Header.h */,
+				BD662615456B71146656DE05 /* Theme.swift */,
+				7F9FDF823C09430E607F9617 /* UserPath.swift */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		5C06FBF55A6C3FDF49F20CD9 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				46447A58561F86E7E9D3501C /* EasyPodTests */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		8771C641B089D7CE42F9048E /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1E097FC987F79788DAEA16AF /* EasyPod.app */,
+				D5DA8383529A371884265B5F /* EasyPodTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		8835E186EBFF7F934294508B = {
+			isa = PBXGroup;
+			children = (
+				40F7E64F7A380926C9D8BB6A /* Native */,
+				CF0559FCCDF839CDC8C8A164 /* Resources */,
+				A3A2B800DF303152B400BF8A /* Sources */,
+				5C06FBF55A6C3FDF49F20CD9 /* Tests */,
+				22D71AD2D5950C37A1062B55 /* Frameworks */,
+				8771C641B089D7CE42F9048E /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		980F2021884161C4FA6E0CDE /* App */ = {
+			isa = PBXGroup;
+			children = (
+				2D5F357999572C880C36F228 /* EasyPodApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		994F931A623EA5895D83D0C1 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				3ADB738B7DAC1D041CE43FA9 /* EffectSlot.swift */,
+				3E187D8D2CAF3F3358EA4822 /* RecordingSession.swift */,
+				8DB37543CB8A5DD0C116EBBB /* RecordingSettings.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A3A2B800DF303152B400BF8A /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				DD1248B00FC5FD95D2977318 /* EasyPod */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		BA6C185BC3BAA3AF5F37AF58 /* AudioCapture */ = {
+			isa = PBXGroup;
+			children = (
+				EC33CC1EF41AB364B7B22BE5 /* AudioCaptureRing.cpp */,
+				DE4CF1715011616124064DBB /* AudioCaptureRing.h */,
+			);
+			path = AudioCapture;
+			sourceTree = "<group>";
+		};
+		CF0559FCCDF839CDC8C8A164 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		DD1248B00FC5FD95D2977318 /* EasyPod */ = {
+			isa = PBXGroup;
+			children = (
+				980F2021884161C4FA6E0CDE /* App */,
+				994F931A623EA5895D83D0C1 /* Models */,
+				0E1D6756D977BF3E1ACDB0AC /* Services */,
+				29F8CE3C978985EF8C0C40CF /* Stores */,
+				5664EB11D1B86DAD3EE3D305 /* Support */,
+				06001088741BC8F1D61ED8E5 /* Views */,
+			);
+			path = EasyPod;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		10F7154D7D37693DAB49DC01 /* EasyPod */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A04FB50E98A40C0377EB8F0C /* Build configuration list for PBXNativeTarget "EasyPod" */;
+			buildPhases = (
+				BA1D4D5D0FA867C1277F4DCE /* Prepare native SDK and plugin host */,
+				274D23CE517068324E94E004 /* Sources */,
+				15D3DEA11C6534A99A1079E6 /* Frameworks */,
+				CECD85B152FCDBDEB70D96E5 /* Embed local ASR runtime and scanner */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = EasyPod;
+			packageProductDependencies = (
+			);
+			productName = EasyPod;
+			productReference = 1E097FC987F79788DAEA16AF /* EasyPod.app */;
+			productType = "com.apple.product-type.application";
+		};
+		905A9ACF07CD63635EF81403 /* EasyPodTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FA3F6A26DCEF68EFD6C69A24 /* Build configuration list for PBXNativeTarget "EasyPodTests" */;
+			buildPhases = (
+				F8C90D6F1122F48DDEE6DB87 /* Sources */,
+				A52D86573B50259B18841108 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5116C2C67A4CB279E414FE20 /* PBXTargetDependency */,
+			);
+			name = EasyPodTests;
+			packageProductDependencies = (
+			);
+			productName = EasyPodTests;
+			productReference = D5DA8383529A371884265B5F /* EasyPodTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		37A29C78675EA7CF5E65A434 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					10F7154D7D37693DAB49DC01 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+					905A9ACF07CD63635EF81403 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = DEE1A13082F35ADBC62D17E4 /* Build configuration list for PBXProject "EasyPod" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 8835E186EBFF7F934294508B;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 8771C641B089D7CE42F9048E /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				10F7154D7D37693DAB49DC01 /* EasyPod */,
+				905A9ACF07CD63635EF81403 /* EasyPodTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A52D86573B50259B18841108 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				39856F24ED471B5090F329E3 /* japanese-speech.aiff in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		BA1D4D5D0FA867C1277F4DCE /* Prepare native SDK and plugin host */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Prepare native SDK and plugin host";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "#!/bin/bash\nset -euo pipefail\nTASK_ROOT=\"${SRCROOT:-$(cd \"$(dirname \"$0\")/..\" && pwd)}\"\nTASK_SDK=\"${NEMO_SDK_ROOT:-$HOME/Library/Application Support/NeMoSpeech}\"\nexport PATH=\"/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin\"\ntest -f \"$TASK_SDK/lib/libnemo_speech_asr_c.1.dylib\" || { echo \"error: Installed NeMo SDK is missing: $TASK_SDK\" >&2; exit 1; }\nmkdir -p \"$TASK_ROOT/build/runtime/lib\"\ncp -L \"$TASK_SDK/lib/libnemo_speech_asr_c.1.dylib\" \"$TASK_ROOT/build/runtime/lib/\"\nbash \"$TASK_ROOT/Native/AudioPluginHost/bootstrap_sdk.sh\"\ncmake -S \"$TASK_ROOT/Native/AudioPluginHost\" -B \"$TASK_ROOT/build/native\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=26.0 -DVST3_SDK_ROOT=\"$TASK_ROOT/build/dependencies/vst3sdk\" > \"$TASK_ROOT/build/native-configure.log\" 2>&1 || { tail -40 \"$TASK_ROOT/build/native-configure.log\"; exit 1; }\ncmake --build \"$TASK_ROOT/build/native\" --config Release -j 4 > \"$TASK_ROOT/build/native-build.log\" 2>&1 || { tail -50 \"$TASK_ROOT/build/native-build.log\"; exit 1; }\n";
+		};
+		CECD85B152FCDBDEB70D96E5 /* Embed local ASR runtime and scanner */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed local ASR runtime and scanner";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "#!/bin/bash\nset -euo pipefail\nTASK_ROOT=\"${SRCROOT:?}\"\nTASK_SDK=\"${NEMO_SDK_ROOT:-$HOME/Library/Application Support/NeMoSpeech}\"\nTASK_APP=\"${TARGET_BUILD_DIR:?}/${WRAPPER_NAME:?}\"\nTASK_FRAMEWORKS=\"$TASK_APP/Contents/Frameworks\"\nTASK_RESOURCES=\"$TASK_APP/Contents/Resources\"\nmkdir -p \"$TASK_FRAMEWORKS\" \"$TASK_RESOURCES/ThirdParty\" \"$TASK_APP/Contents/Helpers\"\nfor TASK_LIB in libnemo_speech_asr_c.1.dylib libnemo_speech_asr.dylib libggml.0.dylib libggml-base.0.dylib libggml-blas.0.dylib libggml-cpu.0.dylib libggml-metal.0.dylib libnemo_speech_text_normalization.dylib libllama.0.dylib; do\n  cp -L \"$TASK_SDK/lib/$TASK_LIB\" \"$TASK_FRAMEWORKS/$TASK_LIB\"\n  /usr/bin/codesign --force --sign - \"$TASK_FRAMEWORKS/$TASK_LIB\"\ndone\n/usr/bin/ditto \"$TASK_SDK/share/licenses/nemo-speech\" \"$TASK_RESOURCES/ThirdParty/NeMoSpeech\"\nif test -d \"$TASK_SDK/share/nemo-speech\"; then\n  /usr/bin/ditto \"$TASK_SDK/share/nemo-speech\" \"$TASK_RESOURCES/nemo-speech\"\nfi\ncp \"$TASK_ROOT/build/dependencies/vst3sdk/LICENSE.txt\" \"$TASK_RESOURCES/ThirdParty/VST3-LICENSE.txt\"\ncp \"$TASK_ROOT/build/native/EasyPodPluginScanner\" \"$TASK_APP/Contents/Helpers/\"\n/usr/bin/codesign --force --sign - \"$TASK_APP/Contents/Helpers/EasyPodPluginScanner\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		274D23CE517068324E94E004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C9640B50369A5F07A0A8B9DE /* AudioCaptureRing.cpp in Sources */,
+				19C92ECD2A9E648BA7ACAE3D /* AudioCaptureService.swift in Sources */,
+				74EFC698E31B71B5A730B18D /* AudioDeviceService.swift in Sources */,
+				CD33C43B90955536F2B8C899 /* AudioExportService.swift in Sources */,
+				25C2056D6A49016483048D30 /* ContentView.swift in Sources */,
+				791B4A47A4371F31BF47377F /* EasyPodApp.swift in Sources */,
+				F94F8F8B23FEDDD6988C8972 /* EffectChainService.swift in Sources */,
+				767171B0953D64FA4C3FC32E /* EffectRackView.swift in Sources */,
+				E75984187A3778DAB5649921 /* EffectSlot.swift in Sources */,
+				D625F4DDE1274A53BDE67C7C /* ExportSheet.swift in Sources */,
+				255D1CB92D8F000A4DA29982 /* PlaybackService.swift in Sources */,
+				AA5D97265F8D363855D18040 /* PluginCatalogService.swift in Sources */,
+				8FF0A7C659C050A2C453B157 /* PluginEditorService.swift in Sources */,
+				3273F59E95E4C209BE693DF9 /* PreferencesStore.swift in Sources */,
+				49ED07D6EC182A24E59FEFA0 /* QualityControls.swift in Sources */,
+				3B7044DFE41A172ED9C03BD8 /* RecorderView.swift in Sources */,
+				297914F9B5BABC584B8C3352 /* RecordingSession.swift in Sources */,
+				9DEAF4B0419308159E1DCB72 /* RecordingSettings.swift in Sources */,
+				A0CBE95C25F28A513EE83D94 /* RecordingStore.swift in Sources */,
+				7EBAB4FD839275376035E26D /* SessionFileService.swift in Sources */,
+				E20CF83113A13F8869131BE6 /* SettingsView.swift in Sources */,
+				6D1D598FDF0B0EF0D49FE600 /* SidebarView.swift in Sources */,
+				087FD7CABD052E90FC229F42 /* Theme.swift in Sources */,
+				9D65D0BF980B86CDC0E5EC84 /* TranscriptView.swift in Sources */,
+				8A1493931C0C31438289C210 /* TranscriptionService.swift in Sources */,
+				3576E2F03414C8CBB76703DA /* UserPath.swift in Sources */,
+				2A81AA7F4B88A2CF94E6B6F6 /* WaveformService.swift in Sources */,
+				A9B3113D2612E4C8463ED31D /* WaveformView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F8C90D6F1122F48DDEE6DB87 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CDBE90239C744603E4659769 /* PipelineTests.swift in Sources */,
+				01D42246DD878E2C8F983ADA /* PluginCatalogTests.swift in Sources */,
+				66C572F57AF1CB06FD6657D2 /* TranscriptionTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		5116C2C67A4CB279E414FE20 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 10F7154D7D37693DAB49DC01 /* EasyPod */;
+			targetProxy = 8CFD08021A8F0FA3FBA53927 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		3023108EB9C24BD62F6554F0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/Native/AudioPluginHost",
+					"$(SRCROOT)/Native/AudioCapture",
+				);
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/build/native",
+					"$(SRCROOT)/build/runtime/lib",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lAudioPluginHost",
+					"-lnemo_speech_asr_c.1",
+					"-lc++",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = local.EasyPod;
+				SDKROOT = macosx;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Sources/CNeMoASR";
+				SWIFT_OBJC_BRIDGING_HEADER = "Sources/EasyPod/Support/EasyPod-Bridging-Header.h";
+			};
+			name = Release;
+		};
+		3313C35F5CFE0C120CE85874 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		757312EBA0D0E1B787D3B673 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/Native/AudioPluginHost",
+					"$(SRCROOT)/Native/AudioCapture",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = local.EasyPod.tests;
+				SDKROOT = macosx;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Sources/CNeMoASR";
+				SWIFT_OBJC_BRIDGING_HEADER = "Sources/EasyPod/Support/EasyPod-Bridging-Header.h";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/EasyPod.app/Contents/MacOS/EasyPod";
+			};
+			name = Debug;
+		};
+		C183ABA3AFF64EA23F061F7C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		C344F9859F9A6F279838C82F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/Native/AudioPluginHost",
+					"$(SRCROOT)/Native/AudioCapture",
+				);
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(SRCROOT)/build/native",
+					"$(SRCROOT)/build/runtime/lib",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lAudioPluginHost",
+					"-lnemo_speech_asr_c.1",
+					"-lc++",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = local.EasyPod;
+				SDKROOT = macosx;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Sources/CNeMoASR";
+				SWIFT_OBJC_BRIDGING_HEADER = "Sources/EasyPod/Support/EasyPod-Bridging-Header.h";
+			};
+			name = Debug;
+		};
+		D2476A4C6FB9A9E12243AE7F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/Native/AudioPluginHost",
+					"$(SRCROOT)/Native/AudioCapture",
+				);
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = local.EasyPod.tests;
+				SDKROOT = macosx;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Sources/CNeMoASR";
+				SWIFT_OBJC_BRIDGING_HEADER = "Sources/EasyPod/Support/EasyPod-Bridging-Header.h";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/EasyPod.app/Contents/MacOS/EasyPod";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A04FB50E98A40C0377EB8F0C /* Build configuration list for PBXNativeTarget "EasyPod" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C344F9859F9A6F279838C82F /* Debug */,
+				3023108EB9C24BD62F6554F0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DEE1A13082F35ADBC62D17E4 /* Build configuration list for PBXProject "EasyPod" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3313C35F5CFE0C120CE85874 /* Debug */,
+				C183ABA3AFF64EA23F061F7C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		FA3F6A26DCEF68EFD6C69A24 /* Build configuration list for PBXNativeTarget "EasyPodTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				757312EBA0D0E1B787D3B673 /* Debug */,
+				D2476A4C6FB9A9E12243AE7F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 37A29C78675EA7CF5E65A434 /* Project object */;
+}

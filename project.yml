@@ -1,0 +1,78 @@
+name: EasyPod
+options:
+  minimumXcodeGenVersion: 2.46.0
+  xcodeVersion: "27.0"
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    ARCHS: arm64
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    CLANG_CXX_LANGUAGE_STANDARD: c++17
+targets:
+  EasyPod:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/EasyPod
+      - Native/AudioCapture
+      - path: Resources
+        excludes: [Info.plist]
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.EasyPod
+        INFOPLIST_FILE: Resources/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/EasyPod/Support/EasyPod-Bridging-Header.h
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/Sources/CNeMoASR"
+        HEADER_SEARCH_PATHS: ["$(SRCROOT)/Native/AudioPluginHost", "$(SRCROOT)/Native/AudioCapture"]
+        LIBRARY_SEARCH_PATHS: ["$(SRCROOT)/build/native", "$(SRCROOT)/build/runtime/lib"]
+        OTHER_LDFLAGS: ["$(inherited)", "-lAudioPluginHost", "-lnemo_speech_asr_c.1", "-lc++"]
+        LD_RUNPATH_SEARCH_PATHS: ["$(inherited)", "@executable_path/../Frameworks"]
+        COMBINE_HIDPI_IMAGES: YES
+    dependencies:
+      - sdk: AVFoundation.framework
+      - sdk: AudioToolbox.framework
+      - sdk: CoreAudio.framework
+      - sdk: Cocoa.framework
+    preBuildScripts:
+      - path: script/prepare_native.sh
+        name: Prepare native SDK and plugin host
+        basedOnDependencyAnalysis: false
+    postBuildScripts:
+      - path: script/embed_runtime.sh
+        name: Embed local ASR runtime and scanner
+        basedOnDependencyAnalysis: false
+  EasyPodTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [Tests/EasyPodTests]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.EasyPod.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/EasyPod/Support/EasyPod-Bridging-Header.h
+        HEADER_SEARCH_PATHS: ["$(SRCROOT)/Native/AudioPluginHost", "$(SRCROOT)/Native/AudioCapture"]
+        SWIFT_INCLUDE_PATHS: "$(SRCROOT)/Sources/CNeMoASR"
+    dependencies:
+      - target: EasyPod
+schemes:
+  EasyPod:
+    build:
+      targets:
+        EasyPod: all
+        EasyPodTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [EasyPodTests]
+    archive:
+      config: Release

@@ -5,26 +5,40 @@
 - [x] P1 — Investigate user requirements, the local environment, the installed ASR runtime, and plugin locations.
 - [x] P2 — Generate UI concepts and incorporate icon controls, WAV export, VST3/AU, selectable effect timing, and bit depth.
 - [x] P3 — Save the implementation design, dependency order, and acceptance criteria in this file.
-- [ ] P4 — Obtain the user's approval of the latest UI concept and feature arrangement.
+- [x] P4 — Obtain the user's approval of the latest UI concept and feature arrangement (2026-10-04 instruction to execute this plan and begin construction).
 - [x] P5 — Confirm Swift + SwiftUI for a Mac-only app, prioritizing ease of use, maintainability, and future feature additions.
-- [ ] I1 — Establish the Xcode app project, repository conventions, native dependencies, build workflow, and ad-hoc signing.
-- [ ] I2 — Implement the approved UI, settings, and recording-session persistence.
+- [x] I1 — Establish the Xcode app project, repository conventions, native dependencies, build workflow, and ad-hoc signing.
+- [x] I2 — Implement the approved UI, settings, and recording-session persistence.
 - [ ] I3 — Implement microphone recording, pause, resume, stop, original-audio storage, and playback.
-- [ ] I4 — Implement live transcription with the installed Nemotron 3.5 model.
-- [ ] I5 — Implement AU/VST3 discovery, mixed effect chains, editors, and state persistence.
+- [x] I4 — Implement live transcription with the installed Nemotron 3.5 model.
+- [x] I5 — Implement AU/VST3 discovery, mixed effect chains, editors, and state persistence.
 - [ ] I6 — Implement effects after recording and optional effects during recording.
 - [ ] I7 — Export actual recordings to WAV and AAC/M4A.
 - [ ] I8 — Implement recovery and behavior for permission, storage, ASR, and plugin failures.
-- [ ] V1 — Verify builds, formatting, signatures, and normal app launch.
+- [x] V1 — Verify builds, formatting, signatures, and normal app launch.
 - [ ] V2 — Verify recording, Japanese transcription, persistence, and WAV/AAC export on this Mac.
 - [ ] V3 — Verify mixed AU/VST3 chains, both processing modes, restoration, and failures.
 - [ ] V4 — Compare the app with the approved image and verify appearance, keyboard access, and accessibility.
 
-Current: P4. The user explicitly selected Swift + SwiftUI and requested an English plan. The user-invoked preparing-for-coding-swift skill has been read and incorporated: the app will use an Xcode project with MCP-first development. The app remains Mac-only, with a Japanese UI. The latest UI concept, v5, is awaiting approval. No application source, build configuration, or launch script has been created.
+Current: Paused at the user's explicit request on 2026-10-04, 21:35 JST. The repaired Release is staged at dist/EasyPod.app and is idle. The user manually stopped the latest recording; its original audio and final transcript are saved. No active-recording marker remains. The complete implementation plan is not finished.
 
-Next: Obtain approval or revision instructions for v5. Do not start implementation before UI approval. After approval, begin I1 with EasyPod.xcodeproj, open that project in Xcode, and use its exposed MCP tools where available.
+Next: On the user's request to resume, finish actual WAV 16/24/32-float and AAC at two bitrates with standard-player checks, after-recording preview/offline export and processed-source/double-processing checks, live bypass after the timing repair, and final keyboard/VoiceOver/layout checks. The exact 30-second recording / 5-second pause / 10-second recording flow remains pending; a further device attempt needs new explicit user direction because the authorized attempts below are exhausted. Do not repeat passed units without an affected change or unresolved acceptance condition.
 
-This file is the sole authoritative progress tracker. Save it after each implementation step and independent verification unit. At the start, phase boundaries, and completion, show the full checklist unless the user requests shorter reporting. For ordinary updates, show only changed checkbox lines with Current and Next. Keep command logs and narrative history out of the tracker.
+This file is the sole authoritative progress tracker. Save it after each implementation step and independent verification unit. At phase boundaries and completion, show the full checklist unless the user requests shorter reporting. For ordinary updates, show only changed checkbox lines with Current and Next. Keep raw logs and narrative history elsewhere.
+
+Build evidence: Current Debug and Release builds succeeded, strict Swift formatting passed, and Xcode build log/navigator reported zero issues. The staged Release passed deep/strict ad-hoc signing and Info.plist validation; all 11 Mach-O dependencies had no private installed-SDK paths. Normal launch and Codex Run wiring were observed. The last staging retained the prior bundle in build/stage.lxgptmvh/previous.app.
+
+Targeted verification: Shared capture sample boundaries/pause clock, missing/corrupt processed-file recovery, Japanese mid-stream endpointing/advancing timestamps/final flush and invalid-model original preservation passed. Export checks passed after reading latency/tail from allocated engine units. The scanner timeout/cached-failure/forced-rescan fixture passed. These checks do not substitute for remaining actual-device acceptance.
+
+Actual microphone evidence: The first device execution exposed an inherited Swift MainActor assertion in a tap; nonisolated Sendable factories corrected capture and playback callbacks. The second recorded 53 seconds with pause/resume, natural playback completion and a native-panel 24-bit mono/48 kHz WAV export. The repaired mixed run 811ACCF3-D98E-411B-9425-C8B289E8072B saved 3,982,720 frames in both CAFs (82.973333 seconds), completed without warnings, froze the clock during pause and retained 16 Japanese finals before and after resume. All measured intervals had zero-frame branch lag, with no nonfinite/full-scale-exceeding values. UI-control overhead extended the planned timing to approximately 62.48 + 20.49 recorded seconds; never describe this as a 40-second take.
+
+Latest device execution: The user's renewed response to the proposed repaired 30/5/10 flow authorized one extra execution after the three default attempts. Session 19A36272-8FF0-4E19-AD34-0CC01A625A04 saved 1,751,424 frames (36.488 seconds), completed with no warning, after the user pressed Stop. Three final Japanese segments persisted with ranges 0–5.287687, 5.287687–7.858375 and 7.858375–10.858375 seconds. The recording defaulted to after-recording mode with no effects. A user-interaction guard prevented sending the planned pause action; the user confirmed manually stopping. This establishes the repaired visible timestamp progression and safe stop/persistence, not the pending exact pause flow.
+
+Actual plugin evidence: Supercharger AU and DeepFilter VST3 custom editors opened/closed; DeepFilter Mix=50% and plugin states survived Release relaunch. Reorder/bypass operated in the earlier app. The old 19:29 run preserved original audio and Japanese text but exposed an 80 ms processed advance and incomplete output. Capture now arms both branches from a common future sample boundary after engine allocation and preserves native close errors. The repaired short run above establishes normal-stop alignment/finalization.
+
+Repaired long run: 99BEAB6C-4065-4A52-8703-04FB0EBB87E0 recorded 760.088 seconds before an audio-device configuration change safely paused it. The original and 58 Japanese finals were retained, and the interruption warning was visible. Seven measured intervals had zero-frame branch lag; footprint was 1.2 GB early and 1.1 GB late (1.4 GB peak), with no continuing growth. Processed audio was 1,443 frames short because interruption prevented latency drain; processedComplete correctly remained false. Do not claim complete processed output for this take. The user exported and played its 24-bit/48 kHz/mono WAV at the user-selected export location. Independent comparison found exact original frame count/duration, no missing frames, and zero-lag effects-applied output throughout the clip.
+
+Verification budgets: V2 device flow used the three default executions plus the one explicitly renewed execution (four total); the last was manually stopped, and the precise timing acceptance remains unchecked. Native DeepFilter and mixed CLI smoke units exhausted 3/3; do not rename or rerun them. Formal ASR and recovery passed at 3/3, pause-clock tests passed at 2/3, export tests passed at 2/3, and scanner process-supervision tests passed at 3/3. Actual-app long live checking used two executions: the old alignment failure and the repaired configuration-interrupted run above. Preserve these counts across resumption.
 
 ## Outcome, Requirements, and Scope
 
@@ -99,6 +113,7 @@ The current candidate is [easypod-ui-v5.png](docs/design/easypod-ui-v5.png). It 
 - Full-width bottom section: collapsible "録音・書き出し設定", exposing bit depth, sample rate, WAV/M4A, and mono/stereo. WAV offers 16-bit integer, 24-bit integer, and 32-bit float. When M4A is selected, replace the quality field with AAC target bitrate. Share one settings model and disable unsafe changes during recording.
 - Separate Settings window: detailed preferences such as model location. Keep primary quality controls directly accessible in the main window.
 - Target window size: approximately 1280 × 900, minimum 1100 × 760. Adapt panes and scrolling without hiding primary actions. Do not copy image pixel dimensions as fixed layout constants.
+- 2026-10-04 UI refinement: the user requested tighter width/spacing and lightly rounded rectangular controls like user-reference-v4.png. Use sidebar 236 px and transcript 328 px at 1280 px, scaling to 220/300 at 1100 px; cap central content width at 728 px. Group waveform/transport with a fixed 24 px gap. Quality and effect controls use 6 px outer corners and 4 px selected corners, 32 px control height, equal footer widths; retain reference-style circular transport and the native monitor switch. Use adaptive pale gray backgrounds with slightly darker sidebar/footer surfaces, white rectangular controls, and a softer coral accent, as subsequently requested by the user.
 
 ## Architecture and Design
 
@@ -259,7 +274,7 @@ Begin only after P4 approval. P5 is complete: Swift + SwiftUI is confirmed. The 
 
 ## Final Verification
 
-No application has been implemented, built, launched, or audio-tested. Current planning evidence consists of generated-image inspection, saved English documentation, explicit confirmation of Swift + SwiftUI, and incorporation of the user-invoked Swift preparation skill. Tool flows and commands below are proposed for implementation, not completed project checks.
+The application and required service boundaries are implemented. Completed evidence and outstanding requirements are recorded in Progress Status above. The flows below remain the acceptance specification; a successful build or synthetic test alone does not complete device checks.
 
 Each verification unit permits one initial execution plus two reruns after repairs, including across interruptions. Do not repeat passed checks without a new change or unresolved concern. If the budget is exhausted, report diagnostics and remaining work. Allow approximately 15 minutes for initial native dependency builds, 5 minutes for ordinary builds, and 5 minutes per short device flow. Perform one 10-minute continuous live recording in V3. Do not add CI or a new E2E framework solely for this plan.
 
@@ -278,11 +293,11 @@ When device testing requires microphone consent or user speech, request only the
 
 ## Permission Boundaries and Remaining Uncertainty
 
-- The current work is design and planning only. UI approval is the implementation boundary explicitly required by the user. Swift + SwiftUI is already approved and must not be asked again.
+- Implementation is authorized by the 2026-10-04 request to execute this plan and start building. Use the latest v5 UI reference. Swift + SwiftUI is already approved and must not be asked again.
 - UI approval covers the proposed new-app arrangement before creating its scaffold. Do not modify the installed SDK, plugins, or unrelated repositories.
 - If the environment requires approval for protected configuration paths or GUI launch, explain the concrete operation and follow that restriction.
 - Sign locally with `codesign --sign -`. Sign copied nested code from the inside out, then the app. Do not confuse this with Developer ID, Apple's Ad Hoc provisioning distribution, or notarization. Do not disable Gatekeeper.
 - Actual ASR speed/accuracy, plugin arm64 and hosting compatibility, and capture latency on specific devices remain unverified. Establish evidence in I1/I4/I5/V2/V3. Do not silently remove WAV, VST3, AU, or optional live processing because they are difficult or unverified.
 - Allow model-location selection in Settings. Do not depend on a GUI process's PATH. Normalize pasted path quoting and escaped spaces according to the mandatory macOS reference.
 - The 32-bit WAV choice currently means IEEE float as shown in v5. Keep that representation explicit in the approved UI and verify it in exported files.
-- No application code, Xcode project, repository convention files, or separate progress file has been created. Add the relevant repository files during I1 after UI approval. Keep progress in this plan.
+- Application code, the Xcode project, repository conventions and build entry point are present. Keep progress in this plan; do not introduce a second checklist.
