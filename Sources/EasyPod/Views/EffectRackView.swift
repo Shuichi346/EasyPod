@@ -101,15 +101,18 @@ struct PluginPickerView: View {
             Text(plugin.unavailableReason ?? "\(plugin.manufacturer) · \(plugin.format.rawValue)")
               .font(.caption).foregroundStyle(
                 plugin.unavailableReason == nil ? Color.secondary : Color.orange)
-          }
+          }.accessibilityElement(children: .combine)
           Spacer()
           Button("追加") {
             Task {
               await store.addEffect(plugin)
               dismiss()
             }
-          }.disabled(plugin.unavailableReason != nil)
+          }.buttonStyle(.bordered).disabled(plugin.unavailableReason != nil)
+            .accessibilityLabel("\(plugin.name)（\(plugin.format.rawValue)）を追加")
         }.padding(.vertical, 4)
+          .accessibilityElement(children: .contain)
+          .accessibilityLabel("\(plugin.name)（\(plugin.format.rawValue)）")
       }
       HStack {
         Spacer()

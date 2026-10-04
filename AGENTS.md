@@ -10,4 +10,5 @@
 - Read export latency and tail after the export engine starts, for both offline rendering and realtime fallback. Preflight plugin allocation can report a different latency.
 - Close ASR results/streams/recognizers and VST3 views/components/controllers in ownership order. Keep original audio intact and never apply a saved live chain twice.
 - `PLANS.md` is the only progress checklist. Keep acceptance items pending until observed evidence exists. Device speech and long recording checks cannot be replaced by UI screenshots.
+- Reuse passing evidence for unchanged behavior across related acceptance items. Preserve verification attempt counts across handoffs; do not reset budgets by renaming a check or restart broad device flows for a narrow change. Follow the plan's current resumption scope before running pending audits.
 - Never automatically stop an active recording to rebuild or relaunch.

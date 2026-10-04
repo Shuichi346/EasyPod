@@ -18,4 +18,10 @@ MCP build and four affected tests passed after the current repairs; strict Swift
 
 The isolated scanner timeout/cache fixture passed without touching installed plugins or their production cache. macOS temporary-directory aliases required comparing canonical paths; cached results retained the scanner's actual path key.
 
-The latest manually stopped 36.488-second recording saved three Japanese final segments with advancing time ranges and no warning. The user requested a pause at a stable boundary. No recording remained active; the Release bundle, saved sessions and authoritative resumption notes were retained.
+An earlier manually stopped 36.488-second recording saved three Japanese final segments with advancing time ranges and no warning. At the user's requested pause, no recording remained active; the Release bundle, saved sessions and resumption notes were retained.
+
+The final handoff consolidated existing acceptance evidence instead of repeating microphone flows. Actual I16/I24/F32 WAV and 96/192 kbps AAC exports retained all 1,751,424 program frames and played in QuickTime; F32 was sample-identical to source. The later timed recording retained 41.176 seconds, with the clock frozen at 30 seconds across the five-second pause. Final Release staging and relaunch/session persistence succeeded. The delivered app is `dist/EasyPod.app`.
+
+The plugin picker gained grouped accessibility content, explicit effect-name/AU/VST3 add labels, and standard bordered buttons. Search and DeepFilter addition succeeded in the staged app. Automation still summarized list rows, so independent child-button exposure and full VoiceOver navigation were not established.
+
+After-recording preview, remaining original/processed effect comparisons, some interruption recovery scenarios, and full VoiceOver navigation remained unverified in PLANS.md. The plan was bounded to prevent repeated acceptance loops: reuse evidence for unchanged behavior, retain attempt counts across handoffs, and reopen only the specific requirement implicated by a reported issue or explicit verification request. Outstanding audits did not authorize automatic continuation after delivery.
