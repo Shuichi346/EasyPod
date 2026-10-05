@@ -17,6 +17,7 @@
 		3273F59E95E4C209BE693DF9 /* PreferencesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EFD2EF416B553DFC9F4641E /* PreferencesStore.swift */; };
 		3576E2F03414C8CBB76703DA /* UserPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F9FDF823C09430E607F9617 /* UserPath.swift */; };
 		39856F24ED471B5090F329E3 /* japanese-speech.aiff in Resources */ = {isa = PBXBuildFile; fileRef = B7E77D45B4CD78927B5798AC /* japanese-speech.aiff */; };
+		3AF3966D7B429048F2101FB5 /* EasyPod.icns in Resources */ = {isa = PBXBuildFile; fileRef = C0ABF73A938F62AD9C573E4A /* EasyPod.icns */; };
 		3B7044DFE41A172ED9C03BD8 /* RecorderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D41E7B6F2FE3E1A704575C89 /* RecorderView.swift */; };
 		49ED07D6EC182A24E59FEFA0 /* QualityControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7072AD12D31A660644823F7B /* QualityControls.swift */; };
 		53C381B9A04C72268B08DE7B /* MicrophoneRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B9CA939F6F9ACBB0EEAF6A /* MicrophoneRoutingTests.swift */; };
@@ -99,6 +100,7 @@
 		B51D0E502BDD0E2DF6CC143D /* TranscriptRefinementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptRefinementTests.swift; sourceTree = "<group>"; };
 		B7E77D45B4CD78927B5798AC /* japanese-speech.aiff */ = {isa = PBXFileReference; lastKnownFileType = audio.aiff; path = "japanese-speech.aiff"; sourceTree = "<group>"; };
 		BD662615456B71146656DE05 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		C0ABF73A938F62AD9C573E4A /* EasyPod.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = EasyPod.icns; sourceTree = "<group>"; };
 		D1CE6DDDF2AF7B5C7BDC6B67 /* LibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryTests.swift; sourceTree = "<group>"; };
 		D41E7B6F2FE3E1A704575C89 /* RecorderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecorderView.swift; sourceTree = "<group>"; };
 		D5DA8383529A371884265B5F /* EasyPodTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = EasyPodTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -286,6 +288,7 @@
 		CF0559FCCDF839CDC8C8A164 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				C0ABF73A938F62AD9C573E4A /* EasyPod.icns */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -312,6 +315,7 @@
 			buildPhases = (
 				BA1D4D5D0FA867C1277F4DCE /* Prepare native SDK and plugin host */,
 				274D23CE517068324E94E004 /* Sources */,
+				D6F1582A08D0E35E10124E9A /* Resources */,
 				15D3DEA11C6534A99A1079E6 /* Frameworks */,
 				CECD85B152FCDBDEB70D96E5 /* Embed local ASR runtime and scanner */,
 			);
@@ -390,6 +394,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				39856F24ED471B5090F329E3 /* japanese-speech.aiff in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D6F1582A08D0E35E10124E9A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3AF3966D7B429048F2101FB5 /* EasyPod.icns in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -504,6 +516,7 @@
 		3023108EB9C24BD62F6554F0 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD)";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
 				HEADER_SEARCH_PATHS = (
@@ -689,6 +702,7 @@
 		C344F9859F9A6F279838C82F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD)";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
 				HEADER_SEARCH_PATHS = (

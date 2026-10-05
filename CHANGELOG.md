@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added the selected flat purple recording/waveform app icon.
 - Built the Japanese macOS recorder with local Nemotron transcription, original CAF storage, AU/VST3 effects, and WAV/AAC export.
 - Refined the three-pane layout with pale gray surfaces, compact spacing, and lightly rounded rectangular settings controls.
 - Corrected Swift actor isolation in microphone taps and playback completion callbacks.
