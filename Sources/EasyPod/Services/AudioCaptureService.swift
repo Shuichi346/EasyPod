@@ -1,5 +1,62 @@
 import AVFoundation
+import Darwin
 import Foundation
+import OSLog
+
+@MainActor
+enum CaptureClockReadiness {
+  static func boundary(
+    source: EPCaptureClock, processed: EPCaptureClock?,
+    sourceBaseline: UInt64, processedBaseline: UInt64, sampleRate: Double,
+    earliestHostTime: UInt64 = 0
+  ) -> Int64? {
+    func advances(_ clock: EPCaptureClock, baseline: UInt64) -> Bool {
+      clock.valid && clock.sequence > baseline + 1 && clock.formatRate == sampleRate
+        && clock.previousSampleTime != Int64.min && clock.sampleTime > clock.previousSampleTime
+        && clock.previousHostTime > 0 && clock.previousHostTime >= earliestHostTime
+        && clock.hostTime > clock.previousHostTime
+    }
+    guard advances(source, baseline: sourceBaseline) else { return nil }
+    guard source.sampleTime < Int64.max / 2 - Int64(source.frames) - 4096 else { return nil }
+    var latestEnd = source.sampleTime + Int64(source.frames)
+    if let processed {
+      guard advances(processed, baseline: processedBaseline) else { return nil }
+      let hostDelta =
+        processed.hostTime >= source.hostTime
+        ? AVAudioTime.seconds(forHostTime: processed.hostTime - source.hostTime)
+        : -AVAudioTime.seconds(forHostTime: source.hostTime - processed.hostTime)
+      let sampleDelta = Double(processed.sampleTime) - Double(source.sampleTime)
+      guard abs(sampleDelta - hostDelta * sampleRate) <= 2 else { return nil }
+      guard processed.sampleTime < Int64.max / 2 - Int64(processed.frames) - 4096 else {
+        return nil
+      }
+      latestEnd = max(latestEnd, processed.sampleTime + Int64(processed.frames))
+    }
+    return latestEnd + 4096
+  }
+
+  static func wait(
+    sourceBaseline: UInt64, processedBaseline: UInt64, sampleRate: Double,
+    earliestHostTime: UInt64 = 0,
+    isRunning: () -> Bool, source: () -> EPCaptureClock, processed: (() -> EPCaptureClock)?,
+    timeout: Duration = .seconds(1)
+  ) async throws -> Int64 {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+      try Task.checkCancellation()
+      guard isRunning() else { throw EasyPodError.message("録音の音声接続が停止しました。接続を確認してください。") }
+      if let value = boundary(
+        source: source(), processed: processed?(), sourceBaseline: sourceBaseline,
+        processedBaseline: processedBaseline, sampleRate: sampleRate,
+        earliestHostTime: earliestHostTime)
+      {
+        return value
+      }
+      try await Task.sleep(for: .milliseconds(20))
+    }
+    throw EasyPodError.message("マイクから音声を受け取れませんでした。接続や他のアプリの使用状況を確認してください。")
+  }
+}
 
 // The render closures retain this handle until taps have been removed and the engine has stopped.
 private final class CaptureWriterHandle: @unchecked Sendable {
@@ -10,6 +67,8 @@ private final class CaptureWriterHandle: @unchecked Sendable {
 @MainActor
 final class AudioCaptureService {
   private var engine: AVAudioEngine?
+  private var route: CaptureAudioRoute?
+  private let logger = Logger(subsystem: "local.EasyPod", category: "capture")
   private var sourceMixer: AVAudioMixerNode?
   private var gateMixer: AVAudioMixerNode?
   private var processedMixer: AVAudioMixerNode?
@@ -69,12 +128,22 @@ final class AudioCaptureService {
     let processed = AVAudioMixerNode()
     var sourceTapInstalled = false
     var processedTapInstalled = false
+    var newRoute: CaptureAudioRoute?
+    var stage = "device route"
     do {
-      if let inputID { try AudioDeviceService.selectInput(inputID, engine: newEngine) }
-      let hardwareFormat = newEngine.inputNode.outputFormat(forBus: 0)
-      guard hardwareFormat.sampleRate > 0, hardwareFormat.channelCount > 0 else {
-        throw EasyPodError.message("利用できるマイク入力がありません。")
+      newRoute = try await AudioDeviceService.configureCapture(inputID: inputID, engine: newEngine)
+      stage = "hardware formats"
+      let hardwareFormat = try Self.inputFormat(newEngine.inputNode.inputFormat(forBus: 0))
+      let outputFormat = newEngine.outputNode.outputFormat(forBus: 0)
+      guard outputFormat.sampleRate.isFinite, outputFormat.sampleRate > 0,
+        outputFormat.channelCount > 0
+      else {
+        throw EasyPodError.message("再生出力を準備できませんでした。Macのサウンド出力を確認してください。")
       }
+      logger.info(
+        "Capture route input=\(inputID ?? 0) device=\(newRoute?.deviceID ?? 0) hardware=\(hardwareFormat.sampleRate)/\(hardwareFormat.channelCount) output=\(outputFormat.sampleRate)/\(outputFormat.channelCount) recording=\(settings.sampleRate)/\(settings.channels)"
+      )
+      stage = "graph connection"
       newEngine.attach(original)
       newEngine.attach(gate)
       newEngine.attach(processed)
@@ -89,28 +158,42 @@ final class AudioCaptureService {
       newEngine.mainMixerNode.outputVolume = monitor ? 1 : 0
       original.installTap(
         onBus: 0, bufferSize: 1024, format: format,
-        block: Self.sourceTap(writer: handle, sampleRate: settings.sampleRate))
+        block: Self.sourceTap(writer: handle))
       sourceTapInstalled = true
       if hasProcessed {
         processed.installTap(
           onBus: 0, bufferSize: 1024, format: format,
-          block: Self.processedTap(writer: handle, sampleRate: settings.sampleRate))
+          block: Self.processedTap(writer: handle))
         processedTapInstalled = true
       }
+      stage = "engine start"
+      let sourceBaseline = ep_capture_clock(pointer, false).sequence
+      let processedBaseline = ep_capture_clock(pointer, true).sequence
+      let earliestHostTime = mach_absolute_time()
       newEngine.prepare()
       try newEngine.start()
+      stage = "tap clock readiness"
       try await armSegment(
-        engine: newEngine, source: original, writer: handle,
+        engine: newEngine, writer: handle,
+        sourceBaseline: sourceBaseline, processedBaseline: processedBaseline,
+        earliestHostTime: earliestHostTime,
         settings: settings, effects: effects, hasProcessed: hasProcessed)
     } catch {
+      logger.error(
+        "Capture preparation failed stage=\(stage, privacy: .public) input=\(inputID ?? 0) error=\(error.localizedDescription, privacy: .public)"
+      )
       newEngine.stop()
       if sourceTapInstalled { original.removeTap(onBus: 0) }
       if processedTapInstalled { processed.removeTap(onBus: 0) }
       effects?.detach(from: newEngine)
+      if let newRoute, newRoute.close() != 0 {
+        logger.error("Capture preparation route cleanup failed")
+      }
       ep_capture_destroy(pointer)
       throw error
     }
     self.engine = newEngine
+    self.route = newRoute
     self.sourceMixer = original
     self.gateMixer = gate
     self.processedMixer = processed
@@ -148,24 +231,26 @@ final class AudioCaptureService {
 
   // AVAudioNodeTapBlock is imported as non-Sendable; creating it in MainActor would
   // inherit actor checks even though AVFAudio invokes it on its audio thread.
-  private nonisolated static func sourceTap(writer: CaptureWriterHandle, sampleRate: Double)
+  private nonisolated static func sourceTap(writer: CaptureWriterHandle)
     -> AVAudioNodeTapBlock
   {
     let callback: @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void = { buffer, time in
-      ep_capture_push_source_at(
+      ep_capture_push_source_clocked(
         writer.pointer, buffer.audioBufferList, buffer.frameLength,
-        time.isSampleTimeValid && time.sampleRate == sampleRate ? time.sampleTime : Int64.min)
+        time.isSampleTimeValid ? time.sampleTime : Int64.min, time.sampleRate,
+        time.isHostTimeValid ? time.hostTime : 0, buffer.format.sampleRate)
     }
     return callback
   }
 
-  private nonisolated static func processedTap(writer: CaptureWriterHandle, sampleRate: Double)
+  private nonisolated static func processedTap(writer: CaptureWriterHandle)
     -> AVAudioNodeTapBlock
   {
     let callback: @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void = { buffer, time in
-      ep_capture_push_processed_at(
+      ep_capture_push_processed_clocked(
         writer.pointer, buffer.audioBufferList, buffer.frameLength,
-        time.isSampleTimeValid && time.sampleRate == sampleRate ? time.sampleTime : Int64.min)
+        time.isSampleTimeValid ? time.sampleTime : Int64.min, time.sampleRate,
+        time.isHostTimeValid ? time.hostTime : 0, buffer.format.sampleRate)
     }
     return callback
   }
@@ -188,7 +273,7 @@ final class AudioCaptureService {
     guard !pauseInProgress else { throw EasyPodError.message("一時停止の保存が完了するまでお待ちください。") }
     guard !resumeInProgress else { throw EasyPodError.message("録音の再開が完了するまでお待ちください。") }
     guard let engine, let writer, isPaused, !isFinalizing else { return }
-    guard let sourceMixer else { throw EasyPodError.message("マイク入力を再開できません。") }
+    guard sourceMixer != nil else { throw EasyPodError.message("マイク入力を再開できません。") }
     resumeInProgress = true
     defer { resumeInProgress = false }
     let sourceError = ep_capture_status(writer.pointer).sourceError
@@ -200,9 +285,14 @@ final class AudioCaptureService {
     if !processedFailed { effects?.reset() }
     gateMixer?.outputVolume = 1
     do {
+      let sourceBaseline = ep_capture_clock(writer.pointer, false).sequence
+      let processedBaseline = ep_capture_clock(writer.pointer, true).sequence
+      let earliestHostTime = mach_absolute_time()
       try engine.start()
       try await armSegment(
-        engine: engine, source: sourceMixer, writer: writer,
+        engine: engine, writer: writer,
+        sourceBaseline: sourceBaseline, processedBaseline: processedBaseline,
+        earliestHostTime: earliestHostTime,
         settings: settings, effects: processedFailed ? nil : effects,
         hasProcessed: settings.effectTiming == .duringRecording && !processedFailed)
     } catch {
@@ -258,6 +348,10 @@ final class AudioCaptureService {
     configurationObserver = nil
     self.writer = nil
     self.engine = nil
+    if let route, route.close() != noErr, warning == nil {
+      warning = "録音は保存されましたが、音声接続の後片付けに失敗しました。アプリを終了すると解放されます。"
+    }
+    self.route = nil
     self.sourceMixer = nil
     self.gateMixer = nil
     self.processedMixer = nil
@@ -295,35 +389,46 @@ final class AudioCaptureService {
   }
 
   private func armSegment(
-    engine: AVAudioEngine, source: AVAudioMixerNode, writer: CaptureWriterHandle,
+    engine: AVAudioEngine, writer: CaptureWriterHandle,
+    sourceBaseline: UInt64, processedBaseline: UInt64,
+    earliestHostTime: UInt64,
     settings: RecordingSettings, effects: EffectChain?, hasProcessed: Bool
   ) async throws {
     // Starting the hardware allocates the actual effect render size, which can change latency.
-    let previousTime = source.lastRenderTime
-    var renderTime: AVAudioTime?
-    for _ in 0..<10 {
-      try await Task.sleep(for: .milliseconds(20))
-      if let time = source.lastRenderTime, time.isSampleTimeValid, time.isHostTimeValid,
-        previousTime?.isHostTimeValid != true || time.hostTime > (previousTime?.hostTime ?? 0)
-      {
-        renderTime = time
-        break
-      }
-    }
-    guard engine.isRunning, let renderTime, renderTime.sampleRate == settings.sampleRate else {
-      throw EasyPodError.message("マイクの音声クロックを開始できませんでした。")
+    let boundary: Int64
+    do {
+      boundary = try await CaptureClockReadiness.wait(
+        sourceBaseline: sourceBaseline, processedBaseline: processedBaseline,
+        sampleRate: settings.sampleRate, earliestHostTime: earliestHostTime,
+        isRunning: { engine.isRunning }, source: { ep_capture_clock(writer.pointer, false) },
+        processed: hasProcessed ? { ep_capture_clock(writer.pointer, true) } : nil)
+    } catch {
+      let source = ep_capture_clock(writer.pointer, false)
+      let processed = ep_capture_clock(writer.pointer, true)
+      logger.error(
+        "Capture clock source=\(source.clockRate)/\(source.formatRate) seq=\(source.sequence) sample=\(source.sampleTime) valid=\(source.valid) processed=\(processed.clockRate)/\(processed.formatRate) seq=\(processed.sequence) sample=\(processed.sampleTime) valid=\(processed.valid)"
+      )
+      throw error
     }
     let latency = hasProcessed ? max(0, effects?.latency ?? 0) : 0
     let delayedFrames = (latency * settings.sampleRate).rounded(.up)
     guard delayedFrames.isFinite, delayedFrames < Double(Int64.max / 2),
-      renderTime.sampleTime < Int64.max / 2 - 4096
+      boundary < Int64.max / 2 - Int64(delayedFrames)
     else {
       throw EasyPodError.message("エフェクトの遅延が対応範囲外です。")
     }
     // A future sample boundary prevents independently queued taps from starting one block apart.
-    ep_capture_segment(writer.pointer, renderTime.sampleTime + 4096, UInt64(delayedFrames))
+    ep_capture_segment(writer.pointer, boundary, UInt64(delayedFrames))
     ep_capture_enable_source(writer.pointer, true)
     if hasProcessed { ep_capture_enable_processed(writer.pointer, true) }
+  }
+
+  static func inputFormat(_ hardware: AVAudioFormat) throws -> AVAudioFormat {
+    guard hardware.sampleRate.isFinite, hardware.sampleRate > 0, hardware.channelCount > 0,
+      let format = AVAudioFormat(
+        standardFormatWithSampleRate: hardware.sampleRate, channels: hardware.channelCount)
+    else { throw EasyPodError.message("利用できるマイク入力がありません。") }
+    return format
   }
 
   private func publish() {

@@ -13,18 +13,52 @@ struct TranscriptView: View {
   }
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
-      HStack {
-        Text("文字起こし").font(.system(size: 15, weight: .semibold))
-        Spacer()
+      HStack(spacing: 12) {
         Button {
           NSPasteboard.general.clearContents()
           NSPasteboard.general.setString(
             segments.map(\.text).joined(separator: "\n\n"), forType: .string)
         } label: {
-          Image(systemName: "doc.on.doc").frame(width: 28, height: 28)
+          Image(systemName: "doc.on.doc").font(.system(size: 20, weight: .medium))
+            .frame(width: 36, height: 36).contentShape(.interaction, Rectangle())
         }
         .buttonStyle(.borderless).disabled(segments.isEmpty).help("文字起こしをコピー")
         .accessibilityLabel("文字起こしをコピー")
+        Button {
+          store.refineTranscript()
+        } label: {
+          Image(systemName: "text.badge.checkmark").font(.system(size: 20, weight: .medium))
+            .frame(width: 36, height: 36).contentShape(.interaction, Rectangle())
+        }.disabled(!store.canRefine)
+          .help("清書：録音停止後に同じモデルで原音を再認識します。元の文字起こしは残します。")
+          .accessibilityLabel("文字起こしを清書する")
+        if store.canRestoreTranscript {
+          Button {
+            store.restoreOriginalTranscript()
+          } label: {
+            Image(systemName: "arrow.uturn.backward").font(.system(size: 20, weight: .medium))
+              .frame(width: 36, height: 36).contentShape(.interaction, Rectangle())
+          }.help("清書前の文字起こしに戻す").accessibilityLabel("清書前の文字起こしに戻す")
+        }
+      }.buttonStyle(.borderless).frame(maxWidth: .infinity, alignment: .leading)
+      if store.refining {
+        VStack(alignment: .leading, spacing: 6) {
+          ProgressView(value: store.refinementProgress)
+          HStack {
+            Text(
+              store.refinementCancelling
+                ? "中止しています…" : "清書中… \(Int(store.refinementProgress * 100))%"
+            )
+            .font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Button {
+              store.cancelRefinement()
+            } label: {
+              Image(systemName: "xmark.circle").font(.system(size: 20, weight: .medium))
+                .frame(width: 36, height: 36).contentShape(.interaction, Rectangle())
+            }.disabled(store.refinementCancelling).help("清書を中止").accessibilityLabel("清書を中止")
+          }
+        }
       }
       HStack(spacing: 7) {
         Circle().fill(
@@ -64,6 +98,7 @@ struct TranscriptView: View {
           }.frame(maxWidth: .infinity, alignment: .leading)
         }.onChange(of: segments) { proxy.scrollTo("end", anchor: .bottom) }
       }
-    }.padding(.horizontal, 20).padding(.vertical, 14).frame(maxHeight: .infinity, alignment: .top)
+    }.padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 14)
+      .frame(maxHeight: .infinity, alignment: .top)
   }
 }

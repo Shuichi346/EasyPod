@@ -12,13 +12,18 @@ import Synchronization
   private var generation = UUID()
   private var lastSequence = 0
 
-  func start(modelPath: String, source: URL, sampleRate: Double) {
+  func start(
+    modelPath: String, source: URL, sampleRate: Double,
+    beforePush: (@Sendable () -> Void)? = nil
+  ) {
     segments = []
     status = "モデルを読み込み中"
     generation = UUID()
     lastSequence = 0
     let current = generation
-    let newWorker = ASRWorker(model: UserPath.url(modelPath), source: source, rate: sampleRate) {
+    let newWorker = ASRWorker(
+      model: UserPath.url(modelPath), source: source, rate: sampleRate, beforePush: beforePush
+    ) {
       [weak self] snapshot in
       DispatchQueue.main.async {
         guard let self, self.generation == current else { return }
@@ -64,6 +69,7 @@ private final class ASRWorker: @unchecked Sendable {
   private let model: URL
   private let source: URL
   private let rate: Double
+  private let beforePush: (@Sendable () -> Void)?
   private let event: @Sendable (ASRSnapshot) -> Void
   private var snapshot = ASRSnapshot(sequence: 0, segments: [], status: "モデルを読み込み中")
   private var recognizer: OpaquePointer?
@@ -75,12 +81,13 @@ private final class ASRWorker: @unchecked Sendable {
   private var failed = false
 
   init(
-    model: URL, source: URL, rate: Double,
+    model: URL, source: URL, rate: Double, beforePush: (@Sendable () -> Void)?,
     event: @escaping @Sendable (ASRSnapshot) -> Void
   ) {
     self.model = model
     self.source = source
     self.rate = rate
+    self.beforePush = beforePush
     self.event = event
   }
 
@@ -179,6 +186,9 @@ private final class ASRWorker: @unchecked Sendable {
           mono[sample] += channels[channel][sample] / Float(buffer.format.channelCount)
         }
       }
+      updateLagStatus()
+      // This optional test gate runs on the ASR queue, never on a realtime audio callback.
+      beforePush?()
       let result = mono.withUnsafeBufferPointer {
         nemo_speech_asr_stream_push_f32(stream, $0.baseAddress, $0.count, Int32(rate))
       }
@@ -186,8 +196,18 @@ private final class ASRWorker: @unchecked Sendable {
       cursor += Int64(count)
       try drain()
     }
-    let lag = Double(available.withLock { $0 } - cursor) / rate
-    if lag > 3 { emit(nil, "保存済み音声から認識中（約\(Int(lag))秒の遅れ）") }
+    updateLagStatus()
+  }
+
+  private func processingStatus() -> String {
+    let lag = Double(max(0, available.withLock { $0 } - cursor)) / rate
+    return lag > 3
+      ? "保存済み音声から認識中（約\(Int(lag))秒の遅れ）" : "Nemotron 3.5 · ローカル"
+  }
+
+  private func updateLagStatus() {
+    let status = processingStatus()
+    if snapshot.status != status { emit(nil, status) }
   }
 
   private func drain() throws {
@@ -203,7 +223,7 @@ private final class ASRWorker: @unchecked Sendable {
       let final = nemo_speech_asr_result_is_final(result)
       emit(
         TranscriptSegment(start: utteranceStart, end: end, text: text, isFinal: final),
-        "Nemotron 3.5 · ローカル")
+        processingStatus())
       if final { utteranceStart = end }
     }
   }

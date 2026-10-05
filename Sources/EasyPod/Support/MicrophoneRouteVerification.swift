@@ -1,0 +1,113 @@
+import AVFoundation
+import CoreAudio
+import Foundation
+
+@MainActor
+enum MicrophoneRouteVerification {
+  static var isRequested: Bool {
+    #if DEBUG
+      ProcessInfo.processInfo.arguments.contains("--verify-microphone-routes")
+    #else
+      false
+    #endif
+  }
+
+  #if DEBUG
+    static func run() async {
+      let arguments = ProcessInfo.processInfo.arguments
+      guard let index = arguments.firstIndex(of: "--verify-microphone-routes"),
+        index + 1 < arguments.count
+      else { return }
+      let output = URL(fileURLWithPath: arguments[index + 1])
+      var report: [String: Any] = ["state": "running", "checks": [[String: Any]]()]
+      do {
+        try save(report, to: output)
+        let manager = FileManager.default
+        let marker = manager.homeDirectoryForCurrentUser.appendingPathComponent(
+          "Library/Application Support/EasyPod/active-recording")
+        guard !manager.fileExists(atPath: marker.path) else {
+          throw EasyPodError.message("A real recording is active")
+        }
+        guard await AudioDeviceService.requestPermission() else {
+          throw EasyPodError.message("App microphone authorization was not granted")
+        }
+        let defaultInput = try defaultDevice(kAudioHardwarePropertyDefaultInputDevice)
+        let defaultOutput = try defaultDevice(kAudioHardwarePropertyDefaultOutputDevice)
+        guard let originalOutput = AudioDeviceService.deviceInfo(defaultOutput) else {
+          throw EasyPodError.message("Default output unavailable")
+        }
+        let inputs = AudioDeviceService.inputs()
+        var checks: [[String: Any]] = []
+        for name in ["SAudio", "US-2x2HR"] {
+          guard !manager.fileExists(atPath: marker.path) else {
+            throw EasyPodError.message("A real recording started")
+          }
+          guard let device = inputs.first(where: { $0.name == name }),
+            let originalInput = AudioDeviceService.deviceInfo(device.id)
+          else { throw EasyPodError.message("Selected input unavailable: \(name)") }
+          let directory = manager.temporaryDirectory.appendingPathComponent(
+            "EasyPodMicrophoneVerification-\(UUID())")
+          try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+          defer { try? manager.removeItem(at: directory) }
+          let capture = AudioCaptureService()
+          let settings = RecordingSettings()
+          try await capture.start(
+            directory: directory, settings: settings, inputID: device.id, effects: nil,
+            monitor: false
+          ) { _ in }
+          // Stop remains unconditional after successful start, even if the diagnostic task is cancelled.
+          try? await Task.sleep(for: .milliseconds(300))
+          let result = try await capture.stop()
+          let file = try AVAudioFile(forReading: directory.appendingPathComponent("source.caf"))
+          let inputAfter = AudioDeviceService.deviceInfo(device.id)
+          let outputAfter = AudioDeviceService.deviceInfo(defaultOutput)
+          guard result.sourceComplete, result.warning == nil, result.frameCount > 0,
+            file.length == result.frameCount,
+            file.processingFormat.sampleRate == settings.sampleRate,
+            file.processingFormat.channelCount == UInt32(settings.channels),
+            try defaultDevice(kAudioHardwarePropertyDefaultInputDevice) == defaultInput,
+            try defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) == defaultOutput,
+            inputAfter?.sampleRate == originalInput.sampleRate,
+            outputAfter?.sampleRate == originalOutput.sampleRate
+          else {
+            throw EasyPodError.message("Selected input preservation/frame check failed: \(name)")
+          }
+          let check: [String: Any] = [
+            "name": name, "inputID": device.id,
+            "nativeRate": originalInput.sampleRate,
+            "recordingRate": file.processingFormat.sampleRate,
+            "channels": file.processingFormat.channelCount, "frames": result.frameCount,
+            "complete": result.sourceComplete, "defaultsAndRatesUnchanged": true,
+          ]
+          checks.append(check)
+          report["checks"] = checks
+          try save(report, to: output)
+        }
+        report["state"] = "passed"
+      } catch {
+        report["state"] = "failed"
+        report["error"] = error.localizedDescription
+      }
+      try? save(report, to: output)
+    }
+
+    private static func save(_ report: [String: Any], to output: URL) throws {
+      try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+        .write(to: output, options: .atomic)
+    }
+
+    private static func defaultDevice(_ selector: AudioObjectPropertySelector) throws -> UInt32 {
+      var address = AudioObjectPropertyAddress(
+        mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain)
+      var id: UInt32 = 0
+      var size = UInt32(MemoryLayout<UInt32>.size)
+      let status = AudioObjectGetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &id)
+      guard status == noErr, id != kAudioObjectUnknown else {
+        throw EasyPodError.message("Default device read failed: \(status)")
+      }
+      return id
+    }
+  #endif
+}

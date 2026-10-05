@@ -5,7 +5,6 @@ struct EffectRackView: View {
   @Binding var showPicker: Bool
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text("エフェクト").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
       HStack(spacing: 16) {
         ChoiceSegments(
           title: "エフェクトのタイミング", selection: $store.preferences.settings.effectTiming,

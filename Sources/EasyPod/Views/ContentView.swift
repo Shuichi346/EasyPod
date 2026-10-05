@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
   @Bindable var store: RecordingStore
-  @State private var settingsExpanded = true
+  @State private var settingsExpanded = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -18,13 +18,25 @@ struct ContentView: View {
         }
       }
       Divider()
-      DisclosureGroup(isExpanded: $settingsExpanded) {
-        QualityControls(settings: $store.preferences.settings)
-          .disabled(store.isCapturing).padding(.top, 12)
-      } label: {
-        Text("録音・書き出し設定").font(.headline)
+      VStack(alignment: .leading, spacing: 12) {
+        HStack {
+          Button {
+            settingsExpanded.toggle()
+          } label: {
+            Image(systemName: "slider.horizontal.3").font(.system(size: 20, weight: .medium))
+              .frame(width: 36, height: 36).contentShape(.interaction, Rectangle())
+          }
+          .buttonStyle(.plain)
+          .help(settingsExpanded ? "録音・書き出し設定を閉じる" : "録音・書き出し設定を開く")
+          .accessibilityLabel("録音・書き出し設定")
+          .accessibilityValue(settingsExpanded ? "展開" : "折りたたみ")
+          Spacer()
+        }
+        if settingsExpanded {
+          QualityControls(settings: $store.preferences.settings).disabled(store.isCapturing)
+        }
       }
-      .padding(.horizontal, 20).padding(.vertical, 16)
+      .padding(.horizontal, 20).padding(.vertical, settingsExpanded ? 16 : 6)
       .background(Theme.settings)
     }
     .frame(minWidth: 1100, minHeight: 708)

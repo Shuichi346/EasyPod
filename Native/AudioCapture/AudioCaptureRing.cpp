@@ -19,6 +19,54 @@ constexpr int32_t timestampError = -71002;
 static_assert(std::atomic<uint64_t>::is_always_lock_free);
 static_assert(std::atomic<int64_t>::is_always_lock_free);
 static_assert(std::atomic<float>::is_always_lock_free);
+static_assert(std::atomic<double>::is_always_lock_free);
+
+struct TapClock {
+    std::atomic<uint64_t> version{0}, host{0}, previousHost{0};
+    std::atomic<int64_t> sample{INT64_MIN}, previousSample{INT64_MIN};
+    std::atomic<double> rate{0}, format{0};
+    std::atomic<uint32_t> frames{0};
+    std::atomic<bool> valid{false};
+
+    int64_t observe(uint32_t count, int64_t time, double clockRate, uint64_t hostTime,
+                    double formatRate, double recordingRate) noexcept {
+        double normalized = static_cast<double>(time) * (recordingRate / clockRate);
+        bool usable = count > 0 && time != INT64_MIN && hostTime != 0 &&
+                      std::isfinite(clockRate) && clockRate > 0 && formatRate == recordingRate &&
+                      std::isfinite(normalized) && std::abs(normalized) < static_cast<double>(INT64_MAX / 2);
+        int64_t position = usable ? std::llround(normalized) : INT64_MIN;
+        version.fetch_add(1, std::memory_order_acq_rel);
+        previousSample.store(sample.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        previousHost.store(host.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        sample.store(position, std::memory_order_relaxed);
+        host.store(hostTime, std::memory_order_relaxed);
+        rate.store(clockRate, std::memory_order_relaxed);
+        format.store(formatRate, std::memory_order_relaxed);
+        frames.store(count, std::memory_order_relaxed);
+        valid.store(usable, std::memory_order_relaxed);
+        version.fetch_add(1, std::memory_order_release);
+        return position;
+    }
+
+    EPCaptureClock snapshot() const noexcept {
+        // A contended observation is retried on the control thread's next poll, never spun on audio.
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            uint64_t before = version.load(std::memory_order_acquire);
+            if (before & 1) continue;
+            EPCaptureClock result{before / 2, sample.load(std::memory_order_relaxed),
+                previousSample.load(std::memory_order_relaxed), host.load(std::memory_order_relaxed),
+                previousHost.load(std::memory_order_relaxed), rate.load(std::memory_order_relaxed),
+                format.load(std::memory_order_relaxed), frames.load(std::memory_order_relaxed),
+                valid.load(std::memory_order_relaxed)};
+            std::atomic_thread_fence(std::memory_order_acquire);
+            if (before == version.load(std::memory_order_acquire)) return result;
+        }
+        EPCaptureClock unavailable{};
+        uint64_t current = version.load(std::memory_order_acquire);
+        unavailable.sequence = current / 2 + (current & 1);
+        return unavailable;
+    }
+};
 
 struct Track {
     std::vector<float> samples;
@@ -177,11 +225,13 @@ struct Track {
 
 struct EPCaptureWriter {
     Track source, processed;
+    TapClock sourceClock, processedClock;
+    const double sampleRate;
     std::atomic<float> level{0}, peak{0};
     std::atomic<bool> stopping{false};
     std::atomic<uint64_t> flushRequest{0}, flushFinished{0};
     std::thread worker;
-    explicit EPCaptureWriter(uint32_t channels) : source(channels), processed(channels) {}
+    EPCaptureWriter(uint32_t channels, double rate) : source(channels), processed(channels), sampleRate(rate) {}
     void run() {
         auto lastSync = std::chrono::steady_clock::now();
         while (true) {
@@ -212,7 +262,7 @@ EPCaptureWriter *ep_capture_create(const char *sourcePath, const char *processed
         return nullptr;
     }
     try {
-        auto writer = std::make_unique<EPCaptureWriter>(channels);
+        auto writer = std::make_unique<EPCaptureWriter>(channels, sampleRate);
         OSStatus status = writer->source.open(sourcePath, sampleRate);
         if (!status) status = writer->processed.open(processedPath, sampleRate);
         if (status) { if (error) *error = status; return nullptr; }
@@ -261,6 +311,25 @@ void ep_capture_push_source_at(EPCaptureWriter *writer, const AudioBufferList *b
 void ep_capture_push_processed_at(EPCaptureWriter *writer, const AudioBufferList *buffers, uint32_t frames, int64_t sampleTime) {
     writer->processed.push(buffers, frames, sampleTime, nullptr, nullptr);
 }
+void ep_capture_push_source_clocked(EPCaptureWriter *writer, const AudioBufferList *buffers,
+                                    uint32_t frames, int64_t sampleTime, double clockRate,
+                                    uint64_t hostTime, double formatRate) {
+    writer->source.activePushes.fetch_add(1, std::memory_order_acquire);
+    int64_t position = writer->sourceClock.observe(frames, sampleTime, clockRate, hostTime, formatRate, writer->sampleRate);
+    writer->source.push(buffers, frames, position, &writer->level, &writer->peak);
+    writer->source.activePushes.fetch_sub(1, std::memory_order_release);
+}
+void ep_capture_push_processed_clocked(EPCaptureWriter *writer, const AudioBufferList *buffers,
+                                       uint32_t frames, int64_t sampleTime, double clockRate,
+                                       uint64_t hostTime, double formatRate) {
+    writer->processed.activePushes.fetch_add(1, std::memory_order_acquire);
+    int64_t position = writer->processedClock.observe(frames, sampleTime, clockRate, hostTime, formatRate, writer->sampleRate);
+    writer->processed.push(buffers, frames, position, nullptr, nullptr);
+    writer->processed.activePushes.fetch_sub(1, std::memory_order_release);
+}
+EPCaptureClock ep_capture_clock(EPCaptureWriter *writer, bool processed) {
+    return processed ? writer->processedClock.snapshot() : writer->sourceClock.snapshot();
+}
 EPCaptureStatus ep_capture_status(EPCaptureWriter *writer) {
     return {static_cast<int64_t>(writer->source.written.load()),
             static_cast<int64_t>(writer->processed.written.load()),
@@ -289,4 +358,55 @@ EPCaptureStatus ep_capture_finalize(EPCaptureWriter *writer) {
 }
 int32_t ep_capture_destroy(EPCaptureWriter *writer) {
     return ep_capture_finalize(writer).sourceError;
+}
+
+struct EPPlaybackHandoff {
+    std::atomic<float> level{0};
+    // The low bit is completion; the remaining bits identify the scheduled segment.
+    std::atomic<uint64_t> state{0};
+};
+
+EPPlaybackHandoff *ep_playback_create(void) {
+    try { return new EPPlaybackHandoff; }
+    catch (...) { return nullptr; }
+}
+
+void ep_playback_destroy(EPPlaybackHandoff *handoff) { delete handoff; }
+
+void ep_playback_arm(EPPlaybackHandoff *handoff, uint64_t generation) {
+    handoff->state.store(generation << 1, std::memory_order_release);
+    handoff->level.store(0, std::memory_order_relaxed);
+}
+
+void ep_playback_meter(EPPlaybackHandoff *handoff, const AudioBufferList *buffers, uint32_t frames) {
+    double squares = 0;
+    uint64_t samples = 0;
+    if (buffers) {
+        for (uint32_t index = 0; index < buffers->mNumberBuffers; ++index) {
+            const AudioBuffer &buffer = buffers->mBuffers[index];
+            const float *input = static_cast<const float *>(buffer.mData);
+            if (!input || !buffer.mNumberChannels) continue;
+            uint64_t count = std::min<uint64_t>(static_cast<uint64_t>(frames) * buffer.mNumberChannels,
+                                               buffer.mDataByteSize / sizeof(float));
+            for (uint64_t sample = 0; sample < count; ++sample) {
+                double value = input[sample];
+                if (std::isfinite(value)) squares += value * value;
+            }
+            samples += count;
+        }
+    }
+    handoff->level.store(samples ? static_cast<float>(std::sqrt(squares / samples)) : 0,
+                         std::memory_order_relaxed);
+}
+
+void ep_playback_complete(EPPlaybackHandoff *handoff, uint64_t generation) {
+    uint64_t expected = generation << 1;
+    // One CAS prevents a retired callback from completing a newly sought segment.
+    handoff->state.compare_exchange_strong(expected, expected | 1, std::memory_order_release,
+                                           std::memory_order_relaxed);
+}
+
+EPPlaybackStatus ep_playback_status(EPPlaybackHandoff *handoff, uint64_t generation) {
+    return {handoff->level.load(std::memory_order_relaxed),
+            handoff->state.load(std::memory_order_acquire) == ((generation << 1) | 1)};
 }

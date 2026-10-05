@@ -1,5 +1,19 @@
 # Development notes
 
+## 2026-10-05
+
+Playback gained a sample-clock position, metering, seeking and pause/resume. After-recording preview used the effects graph while retaining original audio. Focused rendered-audio checks established generic preview/export effects and bypass behavior; they did not resolve the separate DeepFilter allocation-latency/live-bypass acceptance item.
+
+Folders were stored in an atomically written `.library-index.json`, leaving UUID session directories stable. Trash moved the entire recording into `.Trash/<UUID>` and restoration moved it back. Folder deletion cleared assignments rather than deleting recordings. The session manifest committed audio metadata and transcript state last; the transcript sidecar served only as recovery data. Batch Trash snapshotted the confirmed IDs, performed throwing save preflight before moving directories, and preserved failed selections on partial success.
+
+Offline refinement rerecognized saved `source.caf` with the configured local GGUF on a serial worker. Requests were bounded to 30 seconds, preferring silence boundaries; recognition context was not retained between chunks. Successful recognition and persistence preceded text replacement, with the original transcript/status retained for restoration. The native offline call could not be interrupted mid-call, so cancellation discarded its result and waited for handle cleanup.
+
+UI revisions enlarged and aligned icon actions, retained help/accessibility labels, widened segmented-control hit areas, and collapsed recording/export settings behind their button. Live waveform bars used bounded recent peaks and UI-only interpolation instead of compressing accumulated history; pause froze motion. Focused library/refinement/playback, ASR backlog, batch Trash and waveform checks passed for their recorded scopes. Full visual/VoiceOver operation remained outside those automated claims.
+
+Microphone investigation established that the engine's input/output nodes shared an AUHAL handle: retargeting an input-only SAudio device also invalidated output. US-2x2HR exposed a 192 kHz hardware clock while recording requested 48 kHz. The repair introduced owned process-private input/output routing and normalized fresh advancing tap clocks into recording-rate frames before arming capture. It retained native input formats, original audio and explicit cleanup failures, without writing system device defaults or physical rates.
+
+The last ordinary build passed, but the selected-device check failed before recording: AUHAL rejected the private route as unusable (`-10851`, `build/device-switch-critical-4.json`). Native microphone authorization succeeded. A further source repair omitted descriptive subdevice channel-count keys, waited asynchronously for alive/rate/channel capabilities and both active device UIDs, and distinguished assignment from readback failures. Preparation timing was a possible cause, not an established fix. This latest source and its adjusted/new readiness tests were not built or executed; the user chose to perform the trial build/run through `script/build_and_run.sh`. Current acceptance, preserved attempt limits and exact resumption scope remained solely in `PLANS.md`.
+
 ## 2026-10-04
 
 The user requested execution of the saved plan and authorized multi-agent work. Construction uses the latest v5 reference. The current Swift preparation skill permits shell-first builds; the plan's Xcode MCP path remains in use where available. XcodeGen 2.46.0 is already installed. Swift 6.4 / Xcode 27.0 target arm64 macOS 26.

@@ -19,6 +19,18 @@ typedef struct {
     float peak;
 } EPCaptureStatus;
 
+typedef struct {
+    uint64_t sequence;
+    int64_t sampleTime;
+    int64_t previousSampleTime;
+    uint64_t hostTime;
+    uint64_t previousHostTime;
+    double clockRate;
+    double formatRate;
+    uint32_t frames;
+    bool valid;
+} EPCaptureClock;
+
 // Creation, flush, and destruction are non-realtime operations.
 EPCaptureWriter *ep_capture_create(const char *sourcePath, const char *processedPath,
                                   double sampleRate, uint32_t channels, int32_t *error);
@@ -34,10 +46,33 @@ void ep_capture_push_source_at(EPCaptureWriter *writer, const AudioBufferList *b
                                uint32_t frames, int64_t sampleTime);
 void ep_capture_push_processed_at(EPCaptureWriter *writer, const AudioBufferList *buffers,
                                   uint32_t frames, int64_t sampleTime);
+// Normalize the declared hardware clock into recording frames and publish bounded atomic metadata.
+void ep_capture_push_source_clocked(EPCaptureWriter *writer, const AudioBufferList *buffers,
+                                    uint32_t frames, int64_t sampleTime, double clockRate,
+                                    uint64_t hostTime, double formatRate);
+void ep_capture_push_processed_clocked(EPCaptureWriter *writer, const AudioBufferList *buffers,
+                                       uint32_t frames, int64_t sampleTime, double clockRate,
+                                       uint64_t hostTime, double formatRate);
+EPCaptureClock ep_capture_clock(EPCaptureWriter *writer, bool processed);
 EPCaptureStatus ep_capture_status(EPCaptureWriter *writer);
 int32_t ep_capture_flush(EPCaptureWriter *writer);
 EPCaptureStatus ep_capture_finalize(EPCaptureWriter *writer);
 int32_t ep_capture_destroy(EPCaptureWriter *writer);
+
+typedef struct EPPlaybackHandoff EPPlaybackHandoff;
+typedef struct {
+    float level;
+    bool completed;
+} EPPlaybackStatus;
+
+// Allocate before rendering and destroy after the tap and scheduled callbacks retire.
+EPPlaybackHandoff *ep_playback_create(void);
+void ep_playback_destroy(EPPlaybackHandoff *handoff);
+void ep_playback_arm(EPPlaybackHandoff *handoff, uint64_t generation);
+// These realtime operations only scan existing PCM and update lock-free atomics.
+void ep_playback_meter(EPPlaybackHandoff *handoff, const AudioBufferList *buffers, uint32_t frames);
+void ep_playback_complete(EPPlaybackHandoff *handoff, uint64_t generation);
+EPPlaybackStatus ep_playback_status(EPPlaybackHandoff *handoff, uint64_t generation);
 
 #ifdef __cplusplus
 }

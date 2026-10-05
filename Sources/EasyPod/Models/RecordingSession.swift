@@ -15,6 +15,7 @@ struct TranscriptSegment: Identifiable, Codable, Equatable, Sendable {
 struct RecordingSession: Identifiable, Codable, Sendable {
   var id = UUID()
   var title: String
+  var folderID: UUID?
   var createdAt = Date()
   var settings = RecordingSettings()
   var status: SessionStatus = .recording
@@ -23,8 +24,16 @@ struct RecordingSession: Identifiable, Codable, Sendable {
   var effects: [EffectSlot] = []
   var transcript: [TranscriptSegment] = []
   var transcriptionStatus: String?
+  var originalTranscript: [TranscriptSegment]?
+  var originalTranscriptionStatus: String?
   var warning: String?
   var duration: Double { Double(frameCount) / settings.sampleRate }
+}
+
+struct RecordingFolder: Identifiable, Codable, Equatable, Sendable {
+  var id = UUID()
+  var name: String
+  var createdAt = Date()
 }
 
 struct CaptureUpdate: Sendable {
