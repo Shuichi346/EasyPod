@@ -3,7 +3,8 @@
 - Use UTF-8 and English code comments describing behavior and rationale.
 - Read `~/.codex/docs/library-notes.md` and `~/.codex/docs/macos-gotchas.md` before coding.
 - `EasyPod.xcodeproj` with the shared EasyPod scheme is authoritative. `project.yml` is its reproducible XcodeGen specification; regenerate after adding sources. Use exposed Xcode MCP builds/diagnostics when the project is open. `script/build_and_run.sh` is the user Run action and CLI fallback. No SwiftPM app packaging.
-- Swift 6 language mode with the installed Swift 6.4 toolchain, arm64, macOS 26+. App state/UI use MainActor; native handles stay with their serial owner.
+- Swift 6 language mode with the installed Swift 6.4 toolchain, arm64, macOS 26+. Keep `ARCHS: arm64` explicitly on both app and test targets in `project.yml`; XcodeGen's macOS app preset overrides project-only architecture settings. App state/UI use MainActor; native handles stay with their serial owner.
+- Keep version/build/category editable through the app target's `MARKETING_VERSION`, `CURRENT_PROJECT_VERSION`, and `INFOPLIST_KEY_LSApplicationCategoryType`; `Resources/Info.plist` expands these settings. Mirror any Xcode edits into `project.yml` before regeneration. Remove `LM_SKIP_METADATA_EXTRACTION` when adding App Intents; it is enabled only while all targets omit them.
 - Use ad-hoc signing (`-`). Preserve installed SDK, GGUF models, plugins, licensing and system security settings. Sign only bundled copies.
 - The approved purple recording/waveform app icon is `Resources/EasyPod.icns`, referenced by `CFBundleIconFile` in `Resources/Info.plist`. Preserve its transparent exterior and multi-resolution representations.
 - Realtime callbacks must not allocate, lock, perform I/O, infer, synchronously wait, or update UI. Preallocate buffers and communicate through bounded native queues. Overrun is a visible failure, never silent success.

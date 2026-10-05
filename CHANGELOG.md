@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed Product > Archive linking by restricting the app and test targets to Apple Silicon, matching the bundled native libraries.
+- Set Music as the app category and version 1.0.0/build 1 through editable Xcode target settings; skipped unused App Intents metadata extraction to clear archive warnings.
 - Added the selected flat purple recording/waveform app icon.
 - Built the Japanese macOS recorder with local Nemotron transcription, original CAF storage, AU/VST3 effects, and WAV/AAC export.
 - Refined the three-pane layout with pale gray surfaces, compact spacing, and lightly rounded rectangular settings controls.

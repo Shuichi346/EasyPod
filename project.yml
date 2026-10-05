@@ -15,6 +15,8 @@ settings:
     DEVELOPMENT_TEAM: ""
     ENABLE_HARDENED_RUNTIME: NO
     ENABLE_USER_SCRIPT_SANDBOXING: NO
+    # No target defines App Intents; skip their unused metadata extraction task.
+    LM_SKIP_METADATA_EXTRACTION: YES
     CLANG_CXX_LANGUAGE_STANDARD: c++17
 targets:
   EasyPod:
@@ -28,7 +30,12 @@ targets:
         buildPhase: resources
     settings:
       base:
+        # Override the macOS target preset to match the arm64-only native runtime.
+        ARCHS: arm64
         PRODUCT_BUNDLE_IDENTIFIER: local.EasyPod
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.music
         INFOPLIST_FILE: Resources/Info.plist
         SWIFT_OBJC_BRIDGING_HEADER: Sources/EasyPod/Support/EasyPod-Bridging-Header.h
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/Sources/CNeMoASR"
@@ -56,6 +63,7 @@ targets:
     sources: [Tests/EasyPodTests]
     settings:
       base:
+        ARCHS: arm64
         PRODUCT_BUNDLE_IDENTIFIER: local.EasyPod.tests
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_OBJC_BRIDGING_HEADER: Sources/EasyPod/Support/EasyPod-Bridging-Header.h
