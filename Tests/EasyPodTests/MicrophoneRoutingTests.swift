@@ -160,6 +160,38 @@ import XCTest
         input: inputA, output: device(5, rate: 48_000, input: 1, output: 0)))
   }
 
+  func testEngineOwnedDefaultRouteIsBorrowedWithoutCreatingOrDestroyingDevices() async throws {
+    let plan = try CaptureDeviceRoutePlan(
+      input: device(1, rate: 48_000, input: 1, output: 0),
+      output: device(2, rate: 192_000, input: 2, output: 2))
+    var configurations: [UInt32] = []
+    let route = try await CaptureAudioRoute.configuredAsync(
+      plan: plan, existingDeviceID: 900,
+      create: { _ in
+        XCTFail("The engine's default route must not be replaced")
+        return 901
+      },
+      destroy: { _ in
+        XCTFail("The engine owns its own route")
+        return noErr
+      },
+      configure: { configurations.append($0) })
+    XCTAssertEqual(route.deviceID, 900)
+    XCTAssertEqual(configurations, [900])
+    XCTAssertEqual(route.close(), noErr)
+    XCTAssertEqual(route.close(), noErr)
+    do {
+      _ = try await CaptureAudioRoute.configuredAsync(
+        plan: plan, existingDeviceID: 900,
+        destroy: { _ in
+          XCTFail("Failed preparation must not destroy an engine-owned route")
+          return noErr
+        },
+        configure: { _ in throw CancellationError() })
+      XCTFail("Cancelled route preparation must fail")
+    } catch { XCTAssertTrue(error is CancellationError) }
+  }
+
   func testAggregateReadinessWaitsForBothDevicesAndReleasesOnFailure() async throws {
     let input = device(1, rate: 16_000, input: 1, output: 0)
     let output = device(2, rate: 48_000, input: 0, output: 2)

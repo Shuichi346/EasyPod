@@ -38,13 +38,23 @@ enum MicrophoneRouteVerification {
         }
         let inputs = AudioDeviceService.inputs()
         var checks: [[String: Any]] = []
-        for name in ["SAudio", "US-2x2HR"] {
+        guard
+          let external = inputs.first(where: {
+            $0.name == "外部マイク" || $0.name == "External Microphone"
+          }), let usb = inputs.first(where: { $0.name == "US-2x2HR" })
+        else {
+          throw EasyPodError.message("External microphone and US-2x2HR are required")
+        }
+        let selectedInputs: [UInt32?] = [nil, external.id, usb.id, external.id]
+        for selectedID in selectedInputs {
           guard !manager.fileExists(atPath: marker.path) else {
             throw EasyPodError.message("A real recording started")
           }
-          guard let device = inputs.first(where: { $0.name == name }),
-            let originalInput = AudioDeviceService.deviceInfo(device.id)
-          else { throw EasyPodError.message("Selected input unavailable: \(name)") }
+          let inputID = selectedID ?? defaultInput
+          guard let originalInput = AudioDeviceService.deviceInfo(inputID) else {
+            throw EasyPodError.message("Selected input unavailable: \(inputID)")
+          }
+          let name = selectedID == nil ? "System microphone" : originalInput.name
           let directory = manager.temporaryDirectory.appendingPathComponent(
             "EasyPodMicrophoneVerification-\(UUID())")
           try manager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -52,14 +62,14 @@ enum MicrophoneRouteVerification {
           let capture = AudioCaptureService()
           let settings = RecordingSettings()
           try await capture.start(
-            directory: directory, settings: settings, inputID: device.id, effects: nil,
+            directory: directory, settings: settings, inputID: selectedID, effects: nil,
             monitor: false
           ) { _ in }
           // Stop remains unconditional after successful start, even if the diagnostic task is cancelled.
           try? await Task.sleep(for: .milliseconds(300))
           let result = try await capture.stop()
           let file = try AVAudioFile(forReading: directory.appendingPathComponent("source.caf"))
-          let inputAfter = AudioDeviceService.deviceInfo(device.id)
+          let inputAfter = AudioDeviceService.deviceInfo(inputID)
           let outputAfter = AudioDeviceService.deviceInfo(defaultOutput)
           guard result.sourceComplete, result.warning == nil, result.frameCount > 0,
             file.length == result.frameCount,
@@ -73,7 +83,7 @@ enum MicrophoneRouteVerification {
             throw EasyPodError.message("Selected input preservation/frame check failed: \(name)")
           }
           let check: [String: Any] = [
-            "name": name, "inputID": device.id,
+            "name": name, "inputID": inputID,
             "nativeRate": originalInput.sampleRate,
             "recordingRate": file.processingFormat.sampleRate,
             "channels": file.processingFormat.channelCount, "frames": result.frameCount,

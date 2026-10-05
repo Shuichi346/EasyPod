@@ -112,12 +112,18 @@ final class CaptureAudioRoute {
 
   init(
     plan: CaptureDeviceRoutePlan,
+    existingDeviceID: UInt32? = nil,
     create: @MainActor ([String: Any]) throws -> UInt32 = AudioDeviceService.createAggregate,
     destroy: @escaping (UInt32) -> OSStatus = AudioHardwareDestroyAggregateDevice
   ) throws {
     input = plan.input
     self.destroy = destroy
-    if plan.needsAggregate {
+    if let existingDeviceID {
+      guard existingDeviceID != kAudioObjectUnknown else {
+        throw EasyPodError.message("録音用の音声接続を確認できませんでした。")
+      }
+      deviceID = existingDeviceID
+    } else if plan.needsAggregate {
       let id = try create(plan.composition(uid: "local.EasyPod.capture.\(UUID())"))
       guard id != kAudioObjectUnknown else {
         throw EasyPodError.message("録音用の音声接続を作成できませんでした。")
@@ -144,6 +150,7 @@ final class CaptureAudioRoute {
 
   static func configured(
     plan: CaptureDeviceRoutePlan,
+    existingDeviceID: UInt32? = nil,
     create: @MainActor ([String: Any]) throws -> UInt32 = AudioDeviceService.createAggregate,
     destroy: @escaping (UInt32) -> OSStatus = AudioHardwareDestroyAggregateDevice,
     configure: (UInt32) throws -> Void
@@ -151,7 +158,8 @@ final class CaptureAudioRoute {
     guard retryCleanup() == noErr else {
       throw EasyPodError.message("前の音声接続を解放できませんでした。アプリを再起動すると解放されます。")
     }
-    let route = try CaptureAudioRoute(plan: plan, create: create, destroy: destroy)
+    let route = try CaptureAudioRoute(
+      plan: plan, existingDeviceID: existingDeviceID, create: create, destroy: destroy)
     do {
       try configure(route.deviceID)
       return route
@@ -166,11 +174,14 @@ final class CaptureAudioRoute {
 
   static func configuredAsync(
     plan: CaptureDeviceRoutePlan,
+    existingDeviceID: UInt32? = nil,
     create: @MainActor ([String: Any]) throws -> UInt32 = AudioDeviceService.createAggregate,
     destroy: @escaping (UInt32) -> OSStatus = AudioHardwareDestroyAggregateDevice,
     configure: @MainActor (UInt32) async throws -> Void
   ) async throws -> CaptureAudioRoute {
-    let route = try configured(plan: plan, create: create, destroy: destroy) { _ in }
+    let route = try configured(
+      plan: plan, existingDeviceID: existingDeviceID, create: create, destroy: destroy
+    ) { _ in }
     do {
       try await configure(route.deviceID)
       return route
@@ -236,26 +247,51 @@ enum AudioDeviceService {
   {
     let system = AudioObjectID(kAudioObjectSystemObject)
     guard
-      let selectedID = inputID
-        ?? property(system, kAudioHardwarePropertyDefaultInputDevice, initial: UInt32(0)),
-      let input = deviceInfo(selectedID),
+      let defaultInputID = property(
+        system, kAudioHardwarePropertyDefaultInputDevice, initial: UInt32(0)),
+      let input = deviceInfo(inputID ?? defaultInputID),
       let outputID = property(
         system, kAudioHardwarePropertyDefaultOutputDevice, initial: UInt32(0)),
       let output = deviceInfo(outputID)
     else {
       throw EasyPodError.message("選択したマイクが見つかりません。接続を確認してください。")
     }
+    let selectedID = input.id
     let plan = try CaptureDeviceRoutePlan(input: input, output: output)
-    return try await CaptureAudioRoute.configuredAsync(plan: plan) { deviceID in
+    logger.info(
+      "Capture route request input=\(input.id) rate=\(input.sampleRate) output=\(output.id) rate=\(output.sampleRate)"
+    )
+    // AVAudioEngine owns the default input/output route, including its hardware clock conversion.
+    // Keep that route when the selected input is already the system input instead of replacing it.
+    let inputNode = engine.inputNode
+    let outputNode = engine.outputNode
+    var existingDeviceID: UInt32?
+    if selectedID == defaultInputID {
+      guard let unit = inputNode.audioUnit else {
+        throw EasyPodError.message("録音用の入出力を準備できませんでした。")
+      }
+      existingDeviceID = try currentDevice(of: unit)
+    }
+    return try await CaptureAudioRoute.configuredAsync(
+      plan: plan, existingDeviceID: existingDeviceID
+    ) { deviceID in
       do {
-        try await CaptureRouteReadiness.wait {
-          CaptureRouteReadiness.matches(
-            deviceInfo(deviceID),
-            activeDeviceUIDs: plan.needsAggregate ? activeSubdeviceUIDs(deviceID) : [], plan: plan)
+        do {
+          try await CaptureRouteReadiness.wait {
+            CaptureRouteReadiness.matches(
+              deviceInfo(deviceID),
+              activeDeviceUIDs: plan.needsAggregate ? activeSubdeviceUIDs(deviceID) : [], plan: plan
+            )
+          }
+        } catch {
+          let observed = deviceInfo(deviceID)
+          let active = plan.needsAggregate ? activeSubdeviceUIDs(deviceID) : []
+          logger.error(
+            "Capture route readiness failed device=\(deviceID) alive=\(observed?.isAlive ?? false) rate=\(observed?.sampleRate ?? 0) inputChannels=\(observed?.inputChannels ?? 0) outputChannels=\(observed?.outputChannels ?? 0) expectedInput=\(plan.input.uid, privacy: .public) expectedOutput=\(plan.output.uid, privacy: .public) active=\(active.description, privacy: .public)"
+          )
+          throw error
         }
-        // Materialize both singleton nodes before borrowing either node's native handle.
-        let inputNode = engine.inputNode
-        let outputNode = engine.outputNode
+        if existingDeviceID != nil { return }
         // The two engine nodes can share one duplex AUHAL; retargeting only input also retargets output.
         guard let inputUnit = inputNode.audioUnit,
           let outputUnit = outputNode.audioUnit
@@ -331,19 +367,30 @@ enum AudioDeviceService {
       logger.error("Capture device assignment failed requested=\(id) status=\(status)")
       throw EasyPodError.message("選択したマイクへの切り替えに失敗しました（\(status)）。")
     }
+    let observed = try currentDevice(of: unit)
+    guard observed == id else {
+      logger.error("Capture device readback mismatch requested=\(id) observed=\(observed)")
+      throw EasyPodError.message("選択したマイクの接続情報が一致しないため、録音を開始できませんでした。")
+    }
+  }
+
+  private static func currentDevice(of unit: AudioUnit) throws -> UInt32 {
     var observed: UInt32 = 0
     var size = UInt32(MemoryLayout<UInt32>.size)
     let readStatus = AudioUnitGetProperty(
       unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &observed, &size)
-    guard readStatus == noErr, size == UInt32(MemoryLayout<UInt32>.size), observed == id else {
+    guard readStatus == noErr, size == UInt32(MemoryLayout<UInt32>.size),
+      observed != kAudioObjectUnknown
+    else {
       logger.error(
-        "Capture device readback failed requested=\(id) observed=\(observed) size=\(size) status=\(readStatus)"
+        "Capture device readback failed observed=\(observed) size=\(size) status=\(readStatus)"
       )
       if readStatus != noErr {
         throw EasyPodError.message("マイクの接続先を確認できませんでした（\(readStatus)）。")
       }
       throw EasyPodError.message("選択したマイクの接続情報が一致しないため、録音を開始できませんでした。")
     }
+    return observed
   }
 
   private static func activeSubdeviceUIDs(_ id: UInt32) -> [String] {

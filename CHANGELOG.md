@@ -16,6 +16,6 @@
 - Updated icon controls, pane toolbar alignment and spacing, centered/enlarged seek actions, full-frame control hit areas, and collapsible recording/export settings.
 - Changed the recording waveform to fixed-width recent bars flowing from right to left, with motion frozen during pause.
 - Made live recognition catch-up and finalization status visible while queued audio was still being processed.
-- Reworked selected-microphone routing and tap-clock normalization, and prepared bounded route-readiness and failure-cleanup repairs. The latest microphone repair has not yet been built or verified on the reported devices.
+- Fixed microphone selection and recording-start errors for Apple earphone microphones used as the macOS default input, including switching to and from US-2x2HR. Kept system audio defaults and physical sample rates unchanged.
 
 Acceptance verification and remaining device checks are tracked in PLANS.md.
