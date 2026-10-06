@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreAudio
+import Darwin
 import XCTest
 
 @testable import EasyPod
@@ -479,5 +480,189 @@ import XCTest
       print(
         "Selected microphone \(device.name): \(result.frameCount) frames, 48 kHz mono, complete")
     }
+  }
+}
+
+private final class BufferedCaptureInput: CaptureInputSource, @unchecked Sendable {
+  let sampleRate: Double
+  let channels: UInt32 = 1
+  let bridge: OpaquePointer
+  private let samples: Int
+  private var segment = 0
+
+  init(sampleRate: Double, samples: Int = 8192) {
+    self.sampleRate = sampleRate
+    self.samples = samples
+    bridge = ep_pcm_create(1, 131072)!
+  }
+  deinit { ep_pcm_destroy(bridge) }
+  func start() -> Int32 {
+    ep_pcm_clear(bridge)
+    segment += 1
+    let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+    let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: UInt32(samples))!
+    buffer.frameLength = UInt32(samples)
+    for index in 0..<samples {
+      buffer.floatChannelData![0][index] = Float(segment) * 0.1 + Float(index % 31) * 0.001
+    }
+    return ep_pcm_push(bridge, buffer.audioBufferList, buffer.frameLength)
+      ? 0 : ep_pcm_error(bridge)
+  }
+  func stop() -> Int32 { 0 }
+  func close() -> Int32 { 0 }
+  func read(_ buffers: UnsafeMutablePointer<AudioBufferList>, maximumFrames: UInt32) -> UInt32 {
+    ep_pcm_read(bridge, buffers, maximumFrames)
+  }
+  func error() -> Int32 { ep_pcm_error(bridge) }
+}
+
+private final class TestPCMHandle: @unchecked Sendable {
+  let pointer: OpaquePointer
+  init(_ pointer: OpaquePointer) { self.pointer = pointer }
+}
+
+@MainActor
+final class SeparatedCaptureTests: XCTestCase {
+  private nonisolated static func source(format: AVAudioFormat, handle: TestPCMHandle)
+    -> AVAudioSourceNode
+  {
+    AVAudioSourceNode(format: format) { _, _, frames, buffers in
+      ep_pcm_render_strict(handle.pointer, buffers, frames)
+    }
+  }
+
+  func testBoundedPCMBridgePreservesChannelsAndRejectsOverflowAndRenderUnderflow() throws {
+    let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2))
+    let input = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8))
+    let output = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8))
+    let bridge = try XCTUnwrap(ep_pcm_create(2, 8))
+    defer { ep_pcm_destroy(bridge) }
+    input.frameLength = 8
+    output.frameLength = 8
+    for i in 0..<8 {
+      input.floatChannelData![0][i] = Float(i)
+      input.floatChannelData![1][i] = -Float(i)
+    }
+    XCTAssertTrue(ep_pcm_push(bridge, input.audioBufferList, 8))
+    XCTAssertEqual(ep_pcm_render_strict(bridge, output.mutableAudioBufferList, 4), 0)
+    for i in 0..<4 {
+      XCTAssertEqual(output.floatChannelData![0][i], Float(i))
+      XCTAssertEqual(output.floatChannelData![1][i], -Float(i))
+    }
+    output.frameLength = 8
+    XCTAssertEqual(ep_pcm_render_strict(bridge, output.mutableAudioBufferList, 8), -71006)
+    XCTAssertEqual(ep_pcm_available(bridge), 4)
+    ep_pcm_clear(bridge)
+    XCTAssertTrue(ep_pcm_push(bridge, input.audioBufferList, 8))
+    XCTAssertFalse(ep_pcm_push(bridge, input.audioBufferList, 1))
+    XCTAssertEqual(ep_pcm_error(bridge), -71001)
+    ep_pcm_clear(bridge)
+    output.frameLength = 8
+    XCTAssertEqual(ep_pcm_render(bridge, output.mutableAudioBufferList, 8), 0)
+    for i in 0..<8 { XCTAssertEqual(output.floatChannelData![0][i], 0) }
+    XCTAssertEqual(ep_pcm_error(bridge), 0)
+  }
+
+  func testNativeRateConversionManualEffectsAndPauseResumePreserveOriginal() async throws {
+    for rate in [16000.0, 48000.0, 192000.0] {
+      let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "SeparatedCapture-\(UUID())")
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      defer { try? FileManager.default.removeItem(at: directory) }
+      var code: Int32 = 0
+      let pointer = try XCTUnwrap(
+        directory.appendingPathComponent("source.caf").path.withCString { source in
+          directory.appendingPathComponent("processed.caf").path.withCString { processed in
+            ep_capture_create(source, processed, 48000, 1, &code)
+          }
+        })
+      let feed = try XCTUnwrap(ep_pcm_create(1, 16384))
+      let monitor = try XCTUnwrap(ep_pcm_create(1, 32768))
+      defer {
+        ep_pcm_destroy(feed)
+        ep_pcm_destroy(monitor)
+      }
+      let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
+      let engine = AVAudioEngine()
+      try engine.enableManualRenderingMode(.realtime, format: format, maximumFrameCount: 4096)
+      let source = Self.source(format: format, handle: TestPCMHandle(feed))
+      engine.attach(source)
+      let equalizer = AVAudioUnitEQ(numberOfBands: 1)
+      equalizer.bands[0].bypass = true
+      equalizer.globalGain = -6.0206
+      engine.attach(equalizer)
+      engine.connect(source, to: equalizer, format: format)
+      engine.connect(equalizer, to: engine.mainMixerNode, format: format)
+      let pipeline = try CaptureInputPipeline(
+        input: BufferedCaptureInput(sampleRate: rate), writer: CaptureWriterHandle(pointer),
+        engine: engine, feed: feed, monitorFeed: monitor, format: format, processing: true)
+      ep_capture_segment(pointer, 0, 0)
+      ep_capture_enable_source(pointer, true)
+      ep_capture_enable_processed(pointer, true)
+      try await pipeline.start()
+      try await Task.sleep(for: .milliseconds(40))
+      await pipeline.pause(latency: 0, tail: 0)
+      let first = ep_capture_status(pointer).sourceQueuedFrames
+      XCTAssertEqual(first, Int64(8192 * 48000 / rate))
+      let frozen = ep_capture_status(pointer).sourceQueuedFrames
+      try await Task.sleep(for: .milliseconds(30))
+      XCTAssertEqual(ep_capture_status(pointer).sourceQueuedFrames, frozen)
+      ep_capture_segment(pointer, Int64.min, 0)
+      ep_capture_enable_source(pointer, true)
+      ep_capture_enable_processed(pointer, true)
+      try await pipeline.start()
+      try await Task.sleep(for: .milliseconds(40))
+      await pipeline.pause(latency: 0, tail: 0)
+      await pipeline.close()
+      let state = await pipeline.snapshot()
+      XCTAssertEqual(state.inputError, 0)
+      XCTAssertEqual(state.processingError, 0)
+      XCTAssertEqual(state.cleanupError, 0)
+      engine.detach(source)
+      engine.detach(equalizer)
+      let result = ep_capture_finalize(pointer)
+      XCTAssertEqual(result.sourceError, 0)
+      XCTAssertEqual(result.processedError, 0)
+      XCTAssertEqual(result.sourceFrames, first * 2)
+      XCTAssertEqual(result.processedFrames, result.sourceFrames)
+      let original = try AVAudioFile(forReading: directory.appendingPathComponent("source.caf"))
+      let processed = try AVAudioFile(forReading: directory.appendingPathComponent("processed.caf"))
+      let originalBuffer = try XCTUnwrap(
+        AVAudioPCMBuffer(
+          pcmFormat: original.processingFormat, frameCapacity: UInt32(original.length)))
+      let processedBuffer = try XCTUnwrap(
+        AVAudioPCMBuffer(
+          pcmFormat: processed.processingFormat, frameCapacity: UInt32(processed.length)))
+      try original.read(into: originalBuffer)
+      try processed.read(into: processedBuffer)
+      XCTAssertEqual(originalBuffer.frameLength, processedBuffer.frameLength)
+      var maximumError: Float = 0
+      for i in 0..<Int(originalBuffer.frameLength) {
+        maximumError = max(
+          maximumError,
+          abs(
+            processedBuffer.floatChannelData![0][i] - originalBuffer.floatChannelData![0][i] * 0.5))
+      }
+      XCTAssertLessThan(maximumError, 0.00001)
+    }
+  }
+
+  func testReadinessRechecksFreshClockAfterDelayedMainActorWakeup() async throws {
+    let began = ContinuousClock.now
+    let host = mach_absolute_time()
+    let ready = EPCaptureClock(
+      sequence: 12, sampleTime: 52800, previousSampleTime: 48000,
+      hostTime: host + 100000, previousHostTime: host, clockRate: 48000,
+      formatRate: 48000, frames: 4800, valid: true)
+    Task { @MainActor in
+      try? await Task.sleep(for: .milliseconds(30))
+      usleep(180000)
+    }
+    let boundary = try await CaptureClockReadiness.wait(
+      sourceBaseline: 0, processedBaseline: 0, sampleRate: 48000, earliestHostTime: host,
+      isRunning: { true },
+      source: { ContinuousClock.now - began > .milliseconds(80) ? ready : EPCaptureClock() },
+      processed: nil, timeout: .milliseconds(120))
+    XCTAssertEqual(boundary, 61696)
   }
 }

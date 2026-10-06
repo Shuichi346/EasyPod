@@ -45,8 +45,15 @@ enum MicrophoneRouteVerification {
         else {
           throw EasyPodError.message("External microphone and US-2x2HR are required")
         }
-        let selectedInputs: [UInt32?] = [nil, external.id, usb.id, external.id]
-        for selectedID in selectedInputs {
+        report["defaultOutputName"] = originalOutput.name
+        report["defaultOutputUID"] = originalOutput.uid
+        report["availableInputs"] = inputs.map(\.name)
+        let bluetooth = inputs.first { device in
+          AudioDeviceService.deviceInfo(device.id)?.uid.hasSuffix(":input") == true
+        }
+        let selectedInputs: [UInt32?] =
+          [nil, external.id, usb.id, external.id] + (bluetooth.map { [$0.id] } ?? [])
+        for (operation, selectedID) in selectedInputs.enumerated() {
           guard !manager.fileExists(atPath: marker.path) else {
             throw EasyPodError.message("A real recording started")
           }
@@ -60,13 +67,25 @@ enum MicrophoneRouteVerification {
           try manager.createDirectory(at: directory, withIntermediateDirectories: true)
           defer { try? manager.removeItem(at: directory) }
           let capture = AudioCaptureService()
-          let settings = RecordingSettings()
+          var settings = RecordingSettings()
+          let live = operation == 2
+          if live { settings.effectTiming = .duringRecording }
+          let chain =
+            live
+            ? try await EffectChainService().build(
+              slots: [], sampleRate: settings.sampleRate, channels: settings.channels) : nil
           try await capture.start(
-            directory: directory, settings: settings, inputID: selectedID, effects: nil,
-            monitor: false
+            directory: directory, settings: settings, inputID: selectedID, effects: chain,
+            monitor: operation == 3
           ) { _ in }
           // Stop remains unconditional after successful start, even if the diagnostic task is cancelled.
           try? await Task.sleep(for: .milliseconds(300))
+          if live {
+            try await capture.pause()
+            try? await Task.sleep(for: .milliseconds(80))
+            try await capture.resume()
+            try? await Task.sleep(for: .milliseconds(300))
+          }
           let result = try await capture.stop()
           let file = try AVAudioFile(forReading: directory.appendingPathComponent("source.caf"))
           let inputAfter = AudioDeviceService.deviceInfo(inputID)
@@ -78,16 +97,26 @@ enum MicrophoneRouteVerification {
             try defaultDevice(kAudioHardwarePropertyDefaultInputDevice) == defaultInput,
             try defaultDevice(kAudioHardwarePropertyDefaultOutputDevice) == defaultOutput,
             inputAfter?.sampleRate == originalInput.sampleRate,
-            outputAfter?.sampleRate == originalOutput.sampleRate
+            originalOutput.uid.hasSuffix(":output")
+              || outputAfter?.sampleRate == originalOutput.sampleRate
           else {
             throw EasyPodError.message("Selected input preservation/frame check failed: \(name)")
+          }
+          if live {
+            let processed = try AVAudioFile(
+              forReading: directory.appendingPathComponent("processed.caf"))
+            guard result.processedComplete, processed.length == file.length else {
+              throw EasyPodError.message("Live processing/pause alignment failed")
+            }
           }
           let check: [String: Any] = [
             "name": name, "inputID": inputID,
             "nativeRate": originalInput.sampleRate,
             "recordingRate": file.processingFormat.sampleRate,
             "channels": file.processingFormat.channelCount, "frames": result.frameCount,
-            "complete": result.sourceComplete, "defaultsAndRatesUnchanged": true,
+            "complete": result.sourceComplete, "defaultsAndInputRateUnchanged": true,
+            "monitoring": operation == 3, "liveProcessing": live,
+            "processedComplete": result.processedComplete,
           ]
           checks.append(check)
           report["checks"] = checks

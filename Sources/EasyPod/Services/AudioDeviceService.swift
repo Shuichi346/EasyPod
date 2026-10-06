@@ -242,6 +242,18 @@ enum AudioDeviceService {
     }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
   }
 
+  // Capture requires only the chosen input; playback availability never gates original recording.
+  static func captureInput(_ selectedID: UInt32?) throws -> CaptureDeviceInfo {
+    let id =
+      selectedID ?? property(
+        AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultInputDevice,
+        initial: UInt32(0)) ?? 0
+    guard let input = deviceInfo(id), input.isAlive, input.inputChannels > 0,
+      input.sampleRate.isFinite, input.sampleRate > 0
+    else { throw EasyPodError.message("選択したマイクを利用できません。接続を確認してください。") }
+    return input
+  }
+
   static func configureCapture(inputID: UInt32?, engine: AVAudioEngine) async throws
     -> CaptureAudioRoute
   {

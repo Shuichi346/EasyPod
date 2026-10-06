@@ -42,7 +42,7 @@ enum CaptureClockReadiness {
     timeout: Duration = .seconds(1)
   ) async throws -> Int64 {
     let deadline = ContinuousClock.now + timeout
-    while ContinuousClock.now < deadline {
+    while true {
       try Task.checkCancellation()
       guard isRunning() else { throw EasyPodError.message("録音の音声接続が停止しました。接続を確認してください。") }
       if let value = boundary(
@@ -52,58 +52,81 @@ enum CaptureClockReadiness {
       {
         return value
       }
+      // Check fresh clocks once after a delayed actor wakeup before reporting a timeout.
+      if ContinuousClock.now >= deadline { break }
       try await Task.sleep(for: .milliseconds(20))
     }
-    throw EasyPodError.message("マイクから音声を受け取れませんでした。接続や他のアプリの使用状況を確認してください。")
+    throw EasyPodError.message("マイクの音声時刻を確認できませんでした。接続を確認して録音を開始し直してください。")
   }
 }
 
-// The render closures retain this handle until taps have been removed and the engine has stopped.
-private final class CaptureWriterHandle: @unchecked Sendable {
+// Handles cross serial ownership only after rendering is stopped; callbacks retain PCM handles.
+final class CaptureWriterHandle: @unchecked Sendable {
+  let pointer: OpaquePointer
+  init(_ pointer: OpaquePointer) { self.pointer = pointer }
+}
+
+private final class CapturePCMHandle: @unchecked Sendable {
   let pointer: OpaquePointer
   init(_ pointer: OpaquePointer) { self.pointer = pointer }
 }
 
 @MainActor
 final class AudioCaptureService {
+  private static var pendingInputCleanup: [CaptureInputPipeline] = []
+  private static var pendingPreparedInputs: [CaptureInputDevice] = []
+  private var pipeline: CaptureInputPipeline?
   private var engine: AVAudioEngine?
-  private var route: CaptureAudioRoute?
-  private let logger = Logger(subsystem: "local.EasyPod", category: "capture")
-  private var sourceMixer: AVAudioMixerNode?
-  private var gateMixer: AVAudioMixerNode?
-  private var processedMixer: AVAudioMixerNode?
+  private var sourceNode: AVAudioSourceNode?
+  private var monitorEngine: AVAudioEngine?
+  private var monitorNode: AVAudioSourceNode?
+  private var monitorTask: Task<Void, Never>?
+  private var monitorEnabled = false
   private var writer: CaptureWriterHandle?
   private var effects: EffectChain?
   private var settings = RecordingSettings()
+  private let logger = Logger(subsystem: "local.EasyPod", category: "capture")
   private var ticker: Task<Void, Never>?
-  private var configurationObserver: NSObjectProtocol?
   private var onUpdate: (@MainActor @Sendable (CaptureUpdate) -> Void)?
   private var peaks: [Float] = []
   private var warning: String?
   private(set) var isPaused = false
-  private var isFinalizing = false
   private var isPreparing = false
+  private var isFinalizing = false
   private var pauseInProgress = false
   private var resumeInProgress = false
-  private var lastSourceError: Int32 = 0
   private var processedFailed = false
-  private var expectedProcessedFrames: Int64 = 0
 
   func start(
     directory: URL, settings: RecordingSettings, inputID: UInt32?,
     effects: EffectChain?, monitor: Bool,
     onUpdate: @escaping @MainActor @Sendable (CaptureUpdate) -> Void
   ) async throws {
-    guard engine == nil, !isPreparing else { throw EasyPodError.message("録音はすでに開始されています。") }
+    guard pipeline == nil, !isPreparing else { throw EasyPodError.message("録音はすでに開始されています。") }
     isPreparing = true
     defer { isPreparing = false }
-    guard await AudioDeviceService.requestPermission() else {
-      throw EasyPodError.message("マイクの使用が許可されていません。システム設定のプライバシーとセキュリティで EasyPod を許可してください。")
+    var retained: [CaptureInputPipeline] = []
+    for pending in Self.pendingInputCleanup {
+      await pending.close()
+      if await pending.snapshot().cleanupError != 0 { retained.append(pending) }
     }
+    Self.pendingInputCleanup = retained
+    var prepared: [CaptureInputDevice] = []
+    for pending in Self.pendingPreparedInputs {
+      let code = await Task.detached(priority: .medium) { pending.close() }.value
+      if code != 0 { prepared.append(pending) }
+    }
+    Self.pendingPreparedInputs = prepared
+    guard retained.isEmpty, prepared.isEmpty else {
+      throw EasyPodError.message("前のマイク接続を解放できませんでした。アプリを終了してから開始してください。")
+    }
+    guard await AudioDeviceService.requestPermission() else {
+      throw EasyPodError.message("マイクの使用が許可されていません。システム設定で EasyPod を許可してください。")
+    }
+    let inputInfo = try AudioDeviceService.captureInput(inputID)
     guard settings.channels == 1 || settings.channels == 2,
       let format = AVAudioFormat(
-        commonFormat: .pcmFormatFloat32, sampleRate: settings.sampleRate,
-        channels: AVAudioChannelCount(settings.channels), interleaved: false)
+        standardFormatWithSampleRate: settings.sampleRate, channels: UInt32(settings.channels))
     else { throw EasyPodError.message("録音形式が対応範囲外です。") }
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let sourceURL = directory.appendingPathComponent("source.caf")
@@ -111,316 +134,291 @@ final class AudioCaptureService {
       throw EasyPodError.message("このセッションには録音が存在します。新しい録音を作成してください。")
     }
     let hasProcessed = settings.effectTiming == .duringRecording
-    let processedURL = directory.appendingPathComponent("processed.caf")
     var code: Int32 = 0
+    // Driver initialization may synchronously wait for Core Audio's service threads.
+    // UI waits asynchronously; the initialization task is retired before ownership transfers.
+    let input = try await Task.detached(priority: .medium) {
+      try CaptureInputDevice(deviceID: inputInfo.id)
+    }.value
     let pointer = sourceURL.path.withCString { source in
-      processedURL.path.withCString { processed in
+      directory.appendingPathComponent("processed.caf").path.withCString { processed in
         ep_capture_create(
-          source, hasProcessed ? processed : nil,
-          settings.sampleRate, UInt32(settings.channels), &code)
+          source, hasProcessed ? processed : nil, settings.sampleRate, UInt32(settings.channels),
+          &code)
       }
     }
-    guard let pointer else { throw EasyPodError.message("録音ファイルを作成できませんでした（\(code)）。") }
+    guard let pointer else {
+      await closePreparedInput(input)
+      throw EasyPodError.message("録音ファイルを作成できませんでした（\(code)）。")
+    }
+    guard let feed = ep_pcm_create(UInt32(settings.channels), 16384) else {
+      await closePreparedInput(input)
+      ep_capture_destroy(pointer)
+      throw EasyPodError.message("録音用メモリを確保できませんでした。")
+    }
+    guard let monitorFeed = ep_pcm_create(UInt32(settings.channels), 32768) else {
+      ep_pcm_destroy(feed)
+      await closePreparedInput(input)
+      ep_capture_destroy(pointer)
+      throw EasyPodError.message("録音用メモリを確保できませんでした。")
+    }
     let handle = CaptureWriterHandle(pointer)
     let newEngine = AVAudioEngine()
-    let original = AVAudioMixerNode()
-    let gate = AVAudioMixerNode()
-    let processed = AVAudioMixerNode()
-    var sourceTapInstalled = false
-    var processedTapInstalled = false
-    var newRoute: CaptureAudioRoute?
-    var stage = "device route"
+    var newPipeline: CaptureInputPipeline?
+    var newSource: AVAudioSourceNode?
+    var stage = "input-only processing graph"
     do {
-      newRoute = try await AudioDeviceService.configureCapture(inputID: inputID, engine: newEngine)
-      stage = "hardware formats"
-      let hardwareFormat = try Self.inputFormat(newEngine.inputNode.inputFormat(forBus: 0))
-      let outputFormat = newEngine.outputNode.outputFormat(forBus: 0)
-      guard outputFormat.sampleRate.isFinite, outputFormat.sampleRate > 0,
-        outputFormat.channelCount > 0
-      else {
-        throw EasyPodError.message("再生出力を準備できませんでした。Macのサウンド出力を確認してください。")
-      }
-      logger.info(
-        "Capture route input=\(inputID ?? 0) device=\(newRoute?.deviceID ?? 0) hardware=\(hardwareFormat.sampleRate)/\(hardwareFormat.channelCount) output=\(outputFormat.sampleRate)/\(outputFormat.channelCount) recording=\(settings.sampleRate)/\(settings.channels)"
-      )
-      stage = "graph connection"
-      newEngine.attach(original)
-      newEngine.attach(gate)
-      newEngine.attach(processed)
-      newEngine.connect(newEngine.inputNode, to: original, format: hardwareFormat)
-      newEngine.connect(original, to: gate, format: format)
+      try Task.checkCancellation()
+      // Select manual mode before accessing I/O nodes: this engine never owns a microphone/output route.
+      try newEngine.enableManualRenderingMode(.realtime, format: format, maximumFrameCount: 4096)
+      let source = Self.makeSource(format: format, handle: CapturePCMHandle(feed), strict: true)
+      newSource = source
+      newEngine.attach(source)
       if hasProcessed, let effects {
-        effects.attach(to: newEngine, from: gate, to: processed, format: format)
+        effects.attach(to: newEngine, from: source, to: newEngine.mainMixerNode, format: format)
       } else {
-        newEngine.connect(gate, to: processed, format: format)
+        newEngine.connect(source, to: newEngine.mainMixerNode, format: format)
       }
-      newEngine.connect(processed, to: newEngine.mainMixerNode, format: format)
-      newEngine.mainMixerNode.outputVolume = monitor ? 1 : 0
-      original.installTap(
-        onBus: 0, bufferSize: 1024, format: format,
-        block: Self.sourceTap(writer: handle))
-      sourceTapInstalled = true
-      if hasProcessed {
-        processed.installTap(
-          onBus: 0, bufferSize: 1024, format: format,
-          block: Self.processedTap(writer: handle))
-        processedTapInstalled = true
-      }
-      stage = "engine start"
-      let sourceBaseline = ep_capture_clock(pointer, false).sequence
-      let processedBaseline = ep_capture_clock(pointer, true).sequence
+      let worker = try CaptureInputPipeline(
+        input: input, writer: handle, engine: newEngine, feed: feed,
+        monitorFeed: monitorFeed, format: format, processing: hasProcessed)
+      newPipeline = worker
+      stage = "input-only start"
       let earliestHostTime = mach_absolute_time()
-      newEngine.prepare()
-      try newEngine.start()
-      stage = "tap clock readiness"
+      try await worker.start()
+      stage = "input clock readiness"
       try await armSegment(
-        engine: newEngine, writer: handle,
-        sourceBaseline: sourceBaseline, processedBaseline: processedBaseline,
-        earliestHostTime: earliestHostTime,
-        settings: settings, effects: effects, hasProcessed: hasProcessed)
+        worker: worker, writer: handle, settings: settings, effects: effects,
+        hasProcessed: hasProcessed, earliestHostTime: earliestHostTime)
+      logger.info(
+        "Capture input-only device=\(inputInfo.id) hardware=\(input.sampleRate)/\(input.channels) recording=\(settings.sampleRate)/\(settings.channels)"
+      )
     } catch {
       logger.error(
-        "Capture preparation failed stage=\(stage, privacy: .public) input=\(inputID ?? 0) error=\(error.localizedDescription, privacy: .public)"
+        "Capture preparation failed stage=\(stage, privacy: .public) input=\(inputInfo.id) error=\(error.localizedDescription, privacy: .public)"
       )
-      newEngine.stop()
-      if sourceTapInstalled { original.removeTap(onBus: 0) }
-      if processedTapInstalled { processed.removeTap(onBus: 0) }
-      effects?.detach(from: newEngine)
-      if let newRoute, newRoute.close() != 0 {
-        logger.error("Capture preparation route cleanup failed")
+      if let newPipeline {
+        await newPipeline.close()
+        if await newPipeline.snapshot().cleanupError != 0 {
+          Self.pendingInputCleanup.append(newPipeline)
+        }
+      } else {
+        await closePreparedInput(input)
+        newEngine.stop()
       }
+      effects?.detach(from: newEngine)
+      if let newSource { newEngine.detach(newSource) }
+      ep_pcm_destroy(feed)
+      ep_pcm_destroy(monitorFeed)
       ep_capture_destroy(pointer)
       throw error
     }
-    self.engine = newEngine
-    self.route = newRoute
-    self.sourceMixer = original
-    self.gateMixer = gate
-    self.processedMixer = processed
-    self.writer = handle
+    pipeline = newPipeline
+    engine = newEngine
+    sourceNode = newSource
+    writer = handle
     self.effects = effects
     self.settings = settings
     self.onUpdate = onUpdate
-    self.warning = nil
-    self.lastSourceError = 0
-    self.processedFailed = false
-    self.expectedProcessedFrames = 0
-    self.peaks = []
-    self.isPaused = false
-    self.isFinalizing = false
-    configurationObserver = NotificationCenter.default.addObserver(
-      forName: .AVAudioEngineConfigurationChange, object: newEngine, queue: .main
-    ) { [weak self] _ in
-      Task { @MainActor in
-        guard let self, self.engine != nil, !self.isFinalizing else { return }
-        self.warning = "音声デバイスの構成が変わりました。録音を一時停止しました。保存済みの音声は保持されています。"
-        try? await self.pause()
-        self.publish()
-      }
-    }
+    peaks = []
+    warning = nil
+    processedFailed = false
+    isPaused = false
+    isFinalizing = false
+    monitorEnabled = monitor
+    await configureMonitoring(monitor)
     ticker = Task { [weak self] in
       while !Task.isCancelled {
         try? await Task.sleep(for: .milliseconds(100))
         guard !Task.isCancelled, let self else { return }
-        self.publish()
+        await self.publish()
       }
     }
   }
 
-  func setMonitoring(_ enabled: Bool) { engine?.mainMixerNode.outputVolume = enabled ? 1 : 0 }
-
-  // AVAudioNodeTapBlock is imported as non-Sendable; creating it in MainActor would
-  // inherit actor checks even though AVFAudio invokes it on its audio thread.
-  private nonisolated static func sourceTap(writer: CaptureWriterHandle)
-    -> AVAudioNodeTapBlock
-  {
-    let callback: @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void = { buffer, time in
-      ep_capture_push_source_clocked(
-        writer.pointer, buffer.audioBufferList, buffer.frameLength,
-        time.isSampleTimeValid ? time.sampleTime : Int64.min, time.sampleRate,
-        time.isHostTimeValid ? time.hostTime : 0, buffer.format.sampleRate)
+  private func closePreparedInput(_ input: CaptureInputDevice) async {
+    let code = await Task.detached(priority: .medium) { input.close() }.value
+    if code != 0 {
+      Self.pendingPreparedInputs.append(input)
+      logger.error("Capture input cleanup failed: \(code)")
     }
-    return callback
   }
 
-  private nonisolated static func processedTap(writer: CaptureWriterHandle)
-    -> AVAudioNodeTapBlock
+  private nonisolated static func makeSource(
+    format: AVAudioFormat, handle: CapturePCMHandle, strict: Bool = false
+  )
+    -> AVAudioSourceNode
   {
-    let callback: @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void = { buffer, time in
-      ep_capture_push_processed_clocked(
-        writer.pointer, buffer.audioBufferList, buffer.frameLength,
-        time.isSampleTimeValid ? time.sampleTime : Int64.min, time.sampleRate,
-        time.isHostTimeValid ? time.hostTime : 0, buffer.format.sampleRate)
+    let callback: AVAudioSourceNodeRenderBlock = { _, _, count, buffers in
+      strict
+        ? ep_pcm_render_strict(handle.pointer, buffers, count)
+        : ep_pcm_render(handle.pointer, buffers, count)
     }
-    return callback
+    return AVAudioSourceNode(format: format, renderBlock: callback)
+  }
+
+  func setMonitoring(_ enabled: Bool) {
+    monitorEnabled = enabled
+    let previous = monitorTask
+    monitorTask = Task { [weak self] in
+      await previous?.value
+      guard !Task.isCancelled, let self else { return }
+      await self.configureMonitoring(enabled)
+    }
+  }
+
+  private func configureMonitoring(_ enabled: Bool) async {
+    guard let pipeline else { return }
+    await pipeline.setMonitoring(false)
+    monitorEngine?.stop()
+    if let monitorNode { monitorEngine?.detach(monitorNode) }
+    monitorNode = nil
+    monitorEngine = nil
+    ep_pcm_clear(pipeline.monitorFeed)
+    guard enabled, !isPaused, !isFinalizing,
+      let format = AVAudioFormat(
+        standardFormatWithSampleRate: settings.sampleRate, channels: UInt32(settings.channels))
+    else { return }
+    do {
+      let output = AVAudioEngine()
+      let source = Self.makeSource(format: format, handle: CapturePCMHandle(pipeline.monitorFeed))
+      output.attach(source)
+      output.connect(source, to: output.mainMixerNode, format: format)
+      try output.start()
+      monitorEngine = output
+      monitorNode = source
+      await pipeline.setMonitoring(true)
+    } catch {
+      warning = "モニター出力を開始できませんでした。オリジナル録音は継続します（\(error.localizedDescription)）。"
+      logger.error("Monitor start failed: \(error.localizedDescription, privacy: .public)")
+    }
   }
 
   func pause() async throws {
-    guard let engine, let writer, !isPaused, !isFinalizing else { return }
+    guard let pipeline, !isPaused, !isFinalizing else { return }
     pauseInProgress = true
     defer { pauseInProgress = false }
     isPaused = true
-    ep_capture_enable_source(writer.pointer, false)
-    gateMixer?.outputVolume = 0
-    await drainProcessed(includeTail: false)
-    engine.pause()
-    let result = await Task.detached { ep_capture_flush(writer.pointer) }.value
-    publish()
-    if result != 0 { throw EasyPodError.message(storageError(result)) }
+    await pipeline.pause(latency: liveLatency, tail: 0)
+    await configureMonitoring(false)
+    guard let writer else { return }
+    let code = await Task.detached { ep_capture_flush(writer.pointer) }.value
+    await publish()
+    if code != 0 { throw EasyPodError.message(storageError(code)) }
   }
 
   func resume() async throws {
-    guard !pauseInProgress else { throw EasyPodError.message("一時停止の保存が完了するまでお待ちください。") }
-    guard !resumeInProgress else { throw EasyPodError.message("録音の再開が完了するまでお待ちください。") }
-    guard let engine, let writer, isPaused, !isFinalizing else { return }
-    guard sourceMixer != nil else { throw EasyPodError.message("マイク入力を再開できません。") }
+    guard !pauseInProgress, !resumeInProgress else {
+      throw EasyPodError.message("録音の準備が完了するまでお待ちください。")
+    }
+    guard let pipeline, let writer, isPaused, !isFinalizing else { return }
     resumeInProgress = true
     defer { resumeInProgress = false }
-    let sourceError = ep_capture_status(writer.pointer).sourceError
-    guard sourceError == 0 else {
-      warning = storageError(sourceError)
-      throw EasyPodError.message("保存エラーが発生した録音は再開できません。停止して新しい録音を作成してください。")
+    let state = await pipeline.snapshot()
+    guard ep_capture_status(writer.pointer).sourceError == 0, state.inputError == 0 else {
+      throw EasyPodError.message("音声または保存エラーのある録音は再開できません。停止して新しい録音を作成してください。")
     }
-    // A fresh effect segment excludes paused speech and compensates its startup latency.
     if !processedFailed { effects?.reset() }
-    gateMixer?.outputVolume = 1
+    let sourceBaseline = ep_capture_clock(writer.pointer, false).sequence
+    let processedBaseline = ep_capture_clock(writer.pointer, true).sequence
+    let earliestHostTime = mach_absolute_time()
     do {
-      let sourceBaseline = ep_capture_clock(writer.pointer, false).sequence
-      let processedBaseline = ep_capture_clock(writer.pointer, true).sequence
-      let earliestHostTime = mach_absolute_time()
-      try engine.start()
+      try await pipeline.start()
       try await armSegment(
-        engine: engine, writer: writer,
-        sourceBaseline: sourceBaseline, processedBaseline: processedBaseline,
-        earliestHostTime: earliestHostTime,
-        settings: settings, effects: processedFailed ? nil : effects,
-        hasProcessed: settings.effectTiming == .duringRecording && !processedFailed)
+        worker: pipeline, writer: writer, settings: settings,
+        effects: processedFailed ? nil : effects,
+        hasProcessed: settings.effectTiming == .duringRecording && !processedFailed,
+        earliestHostTime: earliestHostTime, sourceBaseline: sourceBaseline,
+        processedBaseline: processedBaseline)
     } catch {
-      ep_capture_enable_source(writer.pointer, false)
-      ep_capture_enable_processed(writer.pointer, false)
-      warning = "録音を再開できませんでした: \(error.localizedDescription) 保存済みのオリジナル音声は保持されています。"
+      await pipeline.pause(latency: 0, tail: 0)
+      warning = "録音を再開できませんでした: \(error.localizedDescription) 保存済みの音声は保持されています。"
       throw error
     }
     isPaused = false
+    await configureMonitoring(monitorEnabled)
+  }
+
+  private var liveLatency: Double { processedFailed ? 0 : max(0, effects?.latency ?? 0) }
+  private var liveTail: Double {
+    processedFailed ? 0 : min(max(0, effects?.tail ?? 0), min(30, max(0, settings.tailLimit)))
   }
 
   func stop() async throws -> CaptureResult {
     guard !isFinalizing else { throw EasyPodError.message("録音の保存を完了しています。") }
     while pauseInProgress || resumeInProgress { try? await Task.sleep(for: .milliseconds(10)) }
-    guard !isFinalizing else { throw EasyPodError.message("録音の保存を完了しています。") }
-    guard let engine, let writer else { throw EasyPodError.message("録音が開始されていません。") }
+    guard let pipeline, let writer, let engine else { throw EasyPodError.message("録音が開始されていません。") }
     isFinalizing = true
     ticker?.cancel()
     ticker = nil
-    ep_capture_enable_source(writer.pointer, false)
-    gateMixer?.outputVolume = 0
-    if isPaused, settings.effectTiming == .duringRecording && !processedFailed {
-      let tail = min(max(0, effects?.tail ?? 0), min(30, max(0, settings.tailLimit)))
-      let maximum =
-        UInt64(max(0, ep_capture_status(writer.pointer).sourceQueuedFrames))
-        + UInt64((tail * settings.sampleRate).rounded(.up))
-      ep_capture_processed_limit(writer.pointer, maximum)
-      ep_capture_enable_processed(writer.pointer, true)
-      try? engine.start()
+    monitorTask?.cancel()
+    await monitorTask?.value
+    monitorTask = nil
+    await configureMonitoring(false)
+    if isPaused {
+      await pipeline.finishPaused(latency: liveLatency, tail: liveTail)
+    } else {
+      await pipeline.pause(latency: liveLatency, tail: liveTail)
     }
-    await drainProcessed(includeTail: true)
-    engine.stop()
-    sourceMixer?.removeTap(onBus: 0)
-    if settings.effectTiming == .duringRecording { processedMixer?.removeTap(onBus: 0) }
+    await pipeline.close()
+    let pipelineState = await pipeline.snapshot()
+    if pipelineState.cleanupError != 0 { Self.pendingInputCleanup.append(pipeline) }
     effects?.detach(from: engine)
-    _ = await Task.detached { ep_capture_flush(writer.pointer) }.value
+    if let sourceNode { engine.detach(sourceNode) }
+    ep_pcm_destroy(pipeline.feed)
+    ep_pcm_destroy(pipeline.monitorFeed)
     let status = await Task.detached { ep_capture_finalize(writer.pointer) }.value
-    if status.sourceError != 0 {
-      warning = storageError(status.sourceError)
-    } else if status.processedError != 0 {
-      warning = "処理済み音声の保存が中断されました（\(status.processedError)）。オリジナル音声は保存されています。"
+    if status.sourceError != 0 { warning = storageError(status.sourceError) }
+    if pipelineState.inputError != 0 { warning = storageError(pipelineState.inputError) }
+    if pipelineState.cleanupError != 0 {
+      warning = "録音は保存されましたが、マイクの接続を解放できませんでした（\(pipelineState.cleanupError)）。"
     }
     let processedComplete =
-      settings.effectTiming == .duringRecording
-      && !processedFailed && status.processedError == 0
-      && status.processedFrames >= max(status.sourceFrames, expectedProcessedFrames)
+      settings.effectTiming == .duringRecording && !processedFailed
+      && pipelineState.processingError == 0 && status.processedError == 0
+      && status.processedFrames >= status.sourceFrames
     if settings.effectTiming == .duringRecording, !processedComplete, warning == nil {
       warning = "処理済み音声を最後まで保存できませんでした。オリジナル音声を使用してください。"
     }
-    if let configurationObserver {
-      NotificationCenter.default.removeObserver(configurationObserver)
-    }
-    configurationObserver = nil
+    self.pipeline = nil
     self.writer = nil
     self.engine = nil
-    if let route, route.close() != noErr, warning == nil {
-      warning = "録音は保存されましたが、音声接続の後片付けに失敗しました。アプリを終了すると解放されます。"
-    }
-    self.route = nil
-    self.sourceMixer = nil
-    self.gateMixer = nil
-    self.processedMixer = nil
+    self.sourceNode = nil
     self.effects = nil
     isPaused = false
     isFinalizing = false
-    let sourceComplete = status.sourceError == 0
+    let sourceComplete = status.sourceError == 0 && pipelineState.inputError == 0
     onUpdate?(
       CaptureUpdate(
         frameCount: status.sourceFrames, level: 0, peaks: peaks, warning: warning,
         mustStop: !sourceComplete, isPaused: false))
     onUpdate = nil
     return CaptureResult(
-      frameCount: status.sourceFrames, processedComplete: processedComplete,
-      warning: warning, sourceComplete: sourceComplete)
-  }
-
-  private func drainProcessed(includeTail: Bool) async {
-    guard let writer, settings.effectTiming == .duringRecording, !processedFailed else { return }
-    let tail =
-      includeTail ? min(max(0, effects?.tail ?? 0), min(30, max(0, settings.tailLimit))) : 0
-    let status = ep_capture_status(writer.pointer)
-    let maximum =
-      UInt64(max(0, status.sourceQueuedFrames)) + UInt64((tail * settings.sampleRate).rounded(.up))
-    expectedProcessedFrames = Int64(maximum)
-    ep_capture_processed_limit(writer.pointer, maximum)
-    let duration = max(0, effects?.latency ?? 0) + tail + 4096 / settings.sampleRate + 0.1
-    // The engine receives silence through the gate while delayed samples and tails are written.
-    let deadline = ContinuousClock.now + .seconds(duration)
-    while ContinuousClock.now < deadline {
-      if ep_capture_status(writer.pointer).processedQueuedFrames >= Int64(maximum) { break }
-      try? await Task.sleep(for: .milliseconds(20))
-    }
-    ep_capture_enable_processed(writer.pointer, false)
+      frameCount: status.sourceFrames, processedComplete: processedComplete, warning: warning,
+      sourceComplete: sourceComplete)
   }
 
   private func armSegment(
-    engine: AVAudioEngine, writer: CaptureWriterHandle,
-    sourceBaseline: UInt64, processedBaseline: UInt64,
-    earliestHostTime: UInt64,
-    settings: RecordingSettings, effects: EffectChain?, hasProcessed: Bool
+    worker: CaptureInputPipeline, writer: CaptureWriterHandle, settings: RecordingSettings,
+    effects: EffectChain?, hasProcessed: Bool, earliestHostTime: UInt64,
+    sourceBaseline: UInt64 = 0, processedBaseline: UInt64 = 0
   ) async throws {
-    // Starting the hardware allocates the actual effect render size, which can change latency.
-    let boundary: Int64
-    do {
-      boundary = try await CaptureClockReadiness.wait(
-        sourceBaseline: sourceBaseline, processedBaseline: processedBaseline,
-        sampleRate: settings.sampleRate, earliestHostTime: earliestHostTime,
-        isRunning: { engine.isRunning }, source: { ep_capture_clock(writer.pointer, false) },
-        processed: hasProcessed ? { ep_capture_clock(writer.pointer, true) } : nil)
-    } catch {
-      let source = ep_capture_clock(writer.pointer, false)
-      let processed = ep_capture_clock(writer.pointer, true)
-      logger.error(
-        "Capture clock source=\(source.clockRate)/\(source.formatRate) seq=\(source.sequence) sample=\(source.sampleTime) valid=\(source.valid) processed=\(processed.clockRate)/\(processed.formatRate) seq=\(processed.sequence) sample=\(processed.sampleTime) valid=\(processed.valid)"
-      )
-      throw error
+    let boundary = try await CaptureClockReadiness.wait(
+      sourceBaseline: sourceBaseline, processedBaseline: processedBaseline,
+      sampleRate: settings.sampleRate, earliestHostTime: earliestHostTime,
+      isRunning: { ep_capture_status(writer.pointer).sourceError == 0 },
+      source: { ep_capture_clock(writer.pointer, false) },
+      processed: hasProcessed ? { ep_capture_clock(writer.pointer, true) } : nil)
+    let state = await worker.snapshot()
+    guard state.inputError == 0 else { throw EasyPodError.message(storageError(state.inputError)) }
+    guard !hasProcessed || state.processingError == 0 else {
+      throw EasyPodError.message("録音中エフェクトを準備できませんでした（\(state.processingError)）。")
     }
     let latency = hasProcessed ? max(0, effects?.latency ?? 0) : 0
-    let delayedFrames = (latency * settings.sampleRate).rounded(.up)
-    guard delayedFrames.isFinite, delayedFrames < Double(Int64.max / 2),
-      boundary < Int64.max / 2 - Int64(delayedFrames)
-    else {
-      throw EasyPodError.message("エフェクトの遅延が対応範囲外です。")
-    }
-    // A future sample boundary prevents independently queued taps from starting one block apart.
-    ep_capture_segment(writer.pointer, boundary, UInt64(delayedFrames))
-    ep_capture_enable_source(writer.pointer, true)
-    if hasProcessed { ep_capture_enable_processed(writer.pointer, true) }
+    let frames = (latency * settings.sampleRate).rounded(.up)
+    guard frames.isFinite, frames < Double(Int64.max / 2), boundary < Int64.max / 2 - Int64(frames)
+    else { throw EasyPodError.message("エフェクトの遅延が対応範囲外です。") }
+    try await worker.arm(latencyFrames: UInt64(frames), processed: hasProcessed)
   }
 
   static func inputFormat(_ hardware: AVAudioFormat) throws -> AVAudioFormat {
@@ -431,68 +429,42 @@ final class AudioCaptureService {
     return format
   }
 
-  private func publish() {
-    guard let writer else { return }
-    if !processedFailed, settings.effectTiming == .duringRecording, let effects {
-      if let failure = effects.processingFailure {
-        disableFailedProcessing(reason: failure)
-      } else if effects.requiresReconfiguration {
-        disableFailedProcessing(reason: "エフェクトの音声構成または遅延が変更されました。")
+  private func publish() async {
+    guard let pipeline, let writer else { return }
+    let state = await pipeline.snapshot()
+    guard self.pipeline === pipeline, !isFinalizing else { return }
+    if !processedFailed, settings.effectTiming == .duringRecording {
+      let failure = effects?.processingFailure
+      if state.processingError != 0 || failure != nil || effects?.requiresReconfiguration == true {
+        processedFailed = true
+        await pipeline.disableProcessing()
+        warning = "\(failure ?? "エフェクトの音声処理が中断されました。") オリジナル録音は継続します。"
       }
+    }
+    if state.monitoringError != 0, monitorEngine != nil {
+      await configureMonitoring(false)
+      warning = "モニター出力が録音に追いつかず中断しました。オリジナル録音は継続します。"
     }
     let status = ep_capture_status(writer.pointer)
     if !isPaused {
       peaks.append(min(1, status.peak))
       if peaks.count > 240 { peaks.removeFirst(peaks.count - 240) }
     }
-    if status.sourceError != 0 {
-      warning = storageError(status.sourceError)
-      if lastSourceError == 0 {
-        lastSourceError = status.sourceError
-        Task { [weak self] in try? await self?.pause() }
-      }
-    } else if status.processedError != 0 {
-      warning = "処理済み音声の保存が中断されました。オリジナル音声の録音は継続しています（\(status.processedError)）。"
+    let sourceError = status.sourceError != 0 ? status.sourceError : state.inputError
+    if sourceError != 0 {
+      warning = storageError(sourceError)
+      if !isPaused { try? await pause() }
     }
     onUpdate?(
       CaptureUpdate(
-        frameCount: status.sourceFrames,
-        level: isPaused ? 0 : min(1, status.level), peaks: peaks, warning: warning,
-        mustStop: status.sourceError != 0, isPaused: isPaused))
-  }
-
-  private func disableFailedProcessing(reason: String) {
-    guard let engine, let writer, let gateMixer, let processedMixer else { return }
-    processedFailed = true
-    ep_capture_enable_processed(writer.pointer, false)
-    let wasPaused = isPaused
-    ep_capture_enable_source(writer.pointer, false)
-    engine.pause()
-    effects?.detach(from: engine)
-    engine.disconnectNodeOutput(gateMixer)
-    engine.disconnectNodeInput(processedMixer)
-    let format = AVAudioFormat(
-      commonFormat: .pcmFormatFloat32, sampleRate: settings.sampleRate,
-      channels: AVAudioChannelCount(settings.channels), interleaved: false)!
-    engine.connect(gateMixer, to: processedMixer, format: format)
-    warning = "\(reason) 処理済み音声を中断し、オリジナル音声の録音を継続します。"
-    if !wasPaused {
-      ep_capture_enable_source(writer.pointer, true)
-      do { try engine.start() } catch {
-        ep_capture_enable_source(writer.pointer, false)
-        isPaused = true
-        warning = "\(reason) 録音を一時停止しました。保存済みのオリジナル音声は保持されています。"
-      }
-    }
+        frameCount: status.sourceFrames, level: isPaused ? 0 : min(1, status.level), peaks: peaks,
+        warning: warning, mustStop: sourceError != 0, isPaused: isPaused))
   }
 
   private func storageError(_ code: Int32) -> String {
-    if code == -71002 {
-      return "マイクの音声時刻を取得できず録音を一時停止しました。保存済みの音声は保持されています。"
-    }
-    if code == -71001 {
-      return "音声の保存が録音に追いつかず一時停止しました。保存済みの音声は保持されています。"
-    }
-    return "音声を保存できず一時停止しました（\(code)）。空き容量と保存先を確認してください。保存済みの音声は保持されています。"
+    if code == -71002 { return "マイクの音声時刻が変わり録音を一時停止しました。保存済みの音声は保持されています。" }
+    if code == -71003 { return "マイクの接続または音声形式が変わりました。保存済みの音声は保持されています。" }
+    if code == -71001 { return "音声処理または保存が録音に追いつかず一時停止しました。保存済みの音声は保持されています。" }
+    return "音声の録音または保存が中断されました（\(code)）。保存済みの音声は保持されています。"
   }
 }

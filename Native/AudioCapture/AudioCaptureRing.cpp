@@ -1,4 +1,5 @@
 #include "AudioCaptureRing.h"
+#include <CoreAudio/CoreAudio.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -20,6 +21,7 @@ static_assert(std::atomic<uint64_t>::is_always_lock_free);
 static_assert(std::atomic<int64_t>::is_always_lock_free);
 static_assert(std::atomic<float>::is_always_lock_free);
 static_assert(std::atomic<double>::is_always_lock_free);
+static_assert(std::atomic<int32_t>::is_always_lock_free);
 
 struct TapClock {
     std::atomic<uint64_t> version{0}, host{0}, previousHost{0};
@@ -409,4 +411,335 @@ void ep_playback_complete(EPPlaybackHandoff *handoff, uint64_t generation) {
 EPPlaybackStatus ep_playback_status(EPPlaybackHandoff *handoff, uint64_t generation) {
     return {handoff->level.load(std::memory_order_relaxed),
             handoff->state.load(std::memory_order_acquire) == ((generation << 1) | 1)};
+}
+
+namespace {
+constexpr uint32_t maximumPcmChannels = 32;
+constexpr uint32_t maximumPcmCapacity = 1048576;
+constexpr int32_t inputDeviceError = -71003;
+
+struct PcmChannel {
+    float *data;
+    uint32_t stride;
+};
+
+// Resolve the buffer topology before copying any data. No channel can index past
+// its buffer even when channels are grouped into multiple interleaved buffers.
+bool pcmChannels(const AudioBufferList *buffers, uint32_t frames, uint32_t channels,
+                 std::array<PcmChannel, maximumPcmChannels> &mapping) noexcept {
+    if (!buffers || !buffers->mNumberBuffers || buffers->mNumberBuffers > channels) return false;
+    uint32_t channel = 0;
+    for (uint32_t index = 0; index < buffers->mNumberBuffers; ++index) {
+        const AudioBuffer &buffer = buffers->mBuffers[index];
+        uint32_t count = buffer.mNumberChannels;
+        if (!count || count > channels - channel || !buffer.mData ||
+            static_cast<uint64_t>(frames) * count * sizeof(float) > buffer.mDataByteSize) return false;
+        float *base = static_cast<float *>(buffer.mData);
+        for (uint32_t local = 0; local < count; ++local) mapping[channel++] = {base + local, count};
+    }
+    return channel == channels;
+}
+
+uint32_t pcmCapacity(uint32_t requested) noexcept {
+    if (!requested || requested > maximumPcmCapacity) return 0;
+    uint32_t result = 1;
+    while (result < requested) result <<= 1;
+    return result;
+}
+}
+
+struct EPPcmBridge {
+    const uint32_t channels, capacityFrames;
+    std::vector<float> samples;
+    std::atomic<uint64_t> produced{0}, consumed{0};
+    std::atomic<int32_t> error{0};
+
+    EPPcmBridge(uint32_t count, uint32_t frames) : channels(count), capacityFrames(frames),
+        samples(static_cast<size_t>(count) * frames) {}
+
+    void fail(int32_t status) noexcept {
+        int32_t expected = 0;
+        error.compare_exchange_strong(expected, status, std::memory_order_release, std::memory_order_relaxed);
+    }
+
+    void clear() noexcept {
+        produced.store(0, std::memory_order_relaxed);
+        consumed.store(0, std::memory_order_relaxed);
+        error.store(0, std::memory_order_release);
+    }
+
+    uint32_t available() const noexcept {
+        // Called by the sole consumer, whose own position cannot change here.
+        uint64_t position = consumed.load(std::memory_order_relaxed);
+        return static_cast<uint32_t>(produced.load(std::memory_order_acquire) - position);
+    }
+
+    bool push(const AudioBufferList *buffers, uint32_t frames) noexcept {
+        if (error.load(std::memory_order_acquire)) return false;
+        if (!frames) return true;
+        uint64_t position = produced.load(std::memory_order_relaxed);
+        uint64_t queued = position - consumed.load(std::memory_order_acquire);
+        if (frames > capacityFrames - queued) { fail(overflowError); return false; }
+        std::array<PcmChannel, maximumPcmChannels> mapping{};
+        if (!pcmChannels(buffers, frames, channels, mapping)) { fail(-50); return false; }
+        for (uint32_t channel = 0; channel < channels; ++channel) {
+            const PcmChannel &input = mapping[channel];
+            float *target = samples.data() + static_cast<size_t>(channel) * capacityFrames;
+            for (uint32_t frame = 0; frame < frames; ++frame)
+                target[(position + frame) & (capacityFrames - 1)] = input.data[static_cast<size_t>(frame) * input.stride];
+        }
+        produced.store(position + frames, std::memory_order_release);
+        return true;
+    }
+
+    uint32_t read(AudioBufferList *buffers, uint32_t maximumFrames, bool silence) noexcept {
+        if (!maximumFrames) return 0;
+        if (maximumFrames > maximumPcmCapacity) { fail(-50); return 0; }
+        uint64_t position = consumed.load(std::memory_order_relaxed);
+        uint32_t count = static_cast<uint32_t>(std::min<uint64_t>(maximumFrames,
+            produced.load(std::memory_order_acquire) - position));
+        uint32_t outputFrames = silence ? maximumFrames : count;
+        if (!outputFrames) return 0;
+        std::array<PcmChannel, maximumPcmChannels> mapping{};
+        if (!pcmChannels(buffers, outputFrames, channels, mapping)) { fail(-50); return 0; }
+        for (uint32_t channel = 0; channel < channels; ++channel) {
+            const PcmChannel &output = mapping[channel];
+            const float *source = samples.data() + static_cast<size_t>(channel) * capacityFrames;
+            for (uint32_t frame = 0; frame < count; ++frame)
+                output.data[static_cast<size_t>(frame) * output.stride] = source[(position + frame) & (capacityFrames - 1)];
+            for (uint32_t frame = count; frame < outputFrames; ++frame)
+                output.data[static_cast<size_t>(frame) * output.stride] = 0;
+        }
+        for (uint32_t index = 0; index < buffers->mNumberBuffers; ++index)
+            buffers->mBuffers[index].mDataByteSize = outputFrames * buffers->mBuffers[index].mNumberChannels * sizeof(float);
+        consumed.store(position + count, std::memory_order_release);
+        return count;
+    }
+};
+
+EPPcmBridge *ep_pcm_create(uint32_t channels, uint32_t capacityFrames) {
+    uint32_t size = pcmCapacity(capacityFrames);
+    if (!channels || channels > maximumPcmChannels || !size) return nullptr;
+    try { return new EPPcmBridge(channels, size); }
+    catch (...) { return nullptr; }
+}
+void ep_pcm_destroy(EPPcmBridge *bridge) { delete bridge; }
+bool ep_pcm_push(EPPcmBridge *bridge, const AudioBufferList *buffers, uint32_t frames) {
+    return bridge && bridge->push(buffers, frames);
+}
+uint32_t ep_pcm_available(EPPcmBridge *bridge) { return bridge ? bridge->available() : 0; }
+int32_t ep_pcm_error(EPPcmBridge *bridge) { return bridge ? bridge->error.load(std::memory_order_acquire) : -50; }
+uint32_t ep_pcm_read(EPPcmBridge *bridge, AudioBufferList *buffers, uint32_t maximumFrames) {
+    return bridge ? bridge->read(buffers, maximumFrames, false) : 0;
+}
+void ep_pcm_clear(EPPcmBridge *bridge) { if (bridge) bridge->clear(); }
+OSStatus ep_pcm_render(EPPcmBridge *bridge, AudioBufferList *buffers, uint32_t frames) {
+    if (!bridge) return -50;
+    bridge->read(buffers, frames, true);
+    return bridge->error.load(std::memory_order_acquire);
+}
+OSStatus ep_pcm_render_strict(EPPcmBridge *bridge, AudioBufferList *buffers, uint32_t frames) {
+    if (!bridge) return -50;
+    int32_t status = bridge->error.load(std::memory_order_acquire);
+    if (status) return status;
+    if (frames > bridge->available()) {
+        bridge->fail(-71006);
+        return bridge->error.load(std::memory_order_acquire);
+    }
+    bridge->read(buffers, frames, false);
+    return bridge->error.load(std::memory_order_acquire);
+}
+
+struct EPInputCapture {
+    AudioUnit unit = nullptr;
+    AudioDeviceID device = kAudioObjectUnknown;
+    double sampleRate = 0;
+    uint32_t channels = 0, maximumFrames = 0;
+    bool running = false;
+    std::unique_ptr<EPPcmBridge> queue;
+    std::vector<float> scratch;
+    struct BufferStorage { UInt32 count; AudioBuffer buffers[maximumPcmChannels]; } storage{};
+    double expectedSampleTime = 0;
+    uint64_t previousHostTime = 0;
+    bool observedClock = false;
+    std::chrono::steady_clock::time_point nextDeviceCheck{};
+
+    AudioBufferList *buffers() noexcept { return reinterpret_cast<AudioBufferList *>(&storage); }
+
+    OSStatus releaseUnit() noexcept {
+        if (!unit) return noErr;
+        // Dispose is the final callback barrier, including when Stop fails.
+        if (running) AudioOutputUnitStop(unit);
+        OSStatus status = AudioComponentInstanceDispose(unit);
+        if (!status) { unit = nullptr; running = false; }
+        return status;
+    }
+
+    ~EPInputCapture() { releaseUnit(); }
+
+    static OSStatus input(void *context, AudioUnitRenderActionFlags *flags,
+                          const AudioTimeStamp *time, UInt32, UInt32 frames, AudioBufferList *) noexcept {
+        auto *capture = static_cast<EPInputCapture *>(context);
+        if (capture->queue->error.load(std::memory_order_acquire)) return noErr;
+        if (!frames) return noErr;
+        if (frames > capture->maximumFrames) { capture->queue->fail(overflowError); return noErr; }
+        if (!time || !(time->mFlags & kAudioTimeStampSampleTimeValid) ||
+            !std::isfinite(time->mSampleTime)) { capture->queue->fail(timestampError); return noErr; }
+        bool validHost = time->mFlags & kAudioTimeStampHostTimeValid;
+        if (capture->observedClock && (std::abs(time->mSampleTime - capture->expectedSampleTime) > 1.0 ||
+            (validHost && capture->previousHostTime && time->mHostTime <= capture->previousHostTime))) {
+            capture->queue->fail(timestampError);
+            return noErr;
+        }
+        capture->expectedSampleTime = time->mSampleTime + frames;
+        capture->previousHostTime = validHost ? time->mHostTime : 0;
+        capture->observedClock = true;
+        for (uint32_t channel = 0; channel < capture->channels; ++channel) {
+            capture->storage.buffers[channel].mData = capture->scratch.data() + static_cast<size_t>(channel) * capture->maximumFrames;
+            capture->storage.buffers[channel].mDataByteSize = frames * sizeof(float);
+        }
+        OSStatus status = AudioUnitRender(capture->unit, flags, time, 1, frames, capture->buffers());
+        if (status) capture->queue->fail(status);
+        else capture->queue->push(capture->buffers(), frames);
+        // Error reporting belongs to the control owner, never a driver callback.
+        return noErr;
+    }
+};
+
+EPInputCapture *ep_input_create(uint32_t deviceID, int32_t *error) {
+    if (error) *error = noErr;
+    try {
+        auto capture = std::make_unique<EPInputCapture>();
+        capture->device = deviceID;
+        auto failed = [&](OSStatus status) -> EPInputCapture * {
+            if (error) *error = status;
+            // Failed disposal retains callback-owned state rather than releasing it.
+            if (capture->releaseUnit()) capture.release();
+            return nullptr;
+        };
+        if (deviceID == kAudioObjectUnknown) return failed(-50);
+        AudioObjectPropertyAddress aliveAddress{kAudioDevicePropertyDeviceIsAlive, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
+        UInt32 alive = 0, size = sizeof(alive);
+        OSStatus status = AudioObjectGetPropertyData(deviceID, &aliveAddress, 0, nullptr, &size, &alive);
+        if (status || !alive) return failed(status ? status : inputDeviceError);
+        AudioComponentDescription description{kAudioUnitType_Output, kAudioUnitSubType_HALOutput,
+                                             kAudioUnitManufacturer_Apple, 0, 0};
+        AudioComponent component = AudioComponentFindNext(nullptr, &description);
+        if (!component) return failed(kAudioUnitErr_InvalidProperty);
+        status = AudioComponentInstanceNew(component, &capture->unit);
+        if (status) return failed(status);
+        UInt32 enabled = 1, disabled = 0;
+        status = AudioUnitSetProperty(capture->unit, kAudioOutputUnitProperty_EnableIO,
+                                     kAudioUnitScope_Input, 1, &enabled, sizeof(enabled));
+        if (!status) status = AudioUnitSetProperty(capture->unit, kAudioOutputUnitProperty_EnableIO,
+                                                  kAudioUnitScope_Output, 0, &disabled, sizeof(disabled));
+        if (!status) status = AudioUnitSetProperty(capture->unit, kAudioOutputUnitProperty_CurrentDevice,
+                                                  kAudioUnitScope_Global, 0, &deviceID, sizeof(deviceID));
+        if (status) return failed(status);
+        AudioStreamBasicDescription hardware{};
+        size = sizeof(hardware);
+        status = AudioUnitGetProperty(capture->unit, kAudioUnitProperty_StreamFormat,
+                                      kAudioUnitScope_Input, 1, &hardware, &size);
+        if (status) return failed(status);
+        if (!std::isfinite(hardware.mSampleRate) || hardware.mSampleRate <= 0 || hardware.mSampleRate > 768000 ||
+            !hardware.mChannelsPerFrame || hardware.mChannelsPerFrame > maximumPcmChannels) return failed(-50);
+        capture->sampleRate = hardware.mSampleRate;
+        capture->channels = hardware.mChannelsPerFrame;
+        AudioStreamBasicDescription client{};
+        client.mSampleRate = capture->sampleRate;
+        client.mFormatID = kAudioFormatLinearPCM;
+        client.mFormatFlags = kAudioFormatFlagsNativeFloatPacked | kAudioFormatFlagIsNonInterleaved;
+        client.mBytesPerPacket = client.mBytesPerFrame = sizeof(float);
+        client.mFramesPerPacket = 1;
+        client.mChannelsPerFrame = capture->channels;
+        client.mBitsPerChannel = 32;
+        status = AudioUnitSetProperty(capture->unit, kAudioUnitProperty_StreamFormat,
+                                      kAudioUnitScope_Output, 1, &client, sizeof(client));
+        if (!status) status = AudioUnitSetProperty(capture->unit, kAudioUnitProperty_ShouldAllocateBuffer,
+                                                  kAudioUnitScope_Output, 1, &disabled, sizeof(disabled));
+        AURenderCallbackStruct callback{EPInputCapture::input, capture.get()};
+        if (!status) status = AudioUnitSetProperty(capture->unit, kAudioOutputUnitProperty_SetInputCallback,
+                                                  kAudioUnitScope_Global, 0, &callback, sizeof(callback));
+        if (!status) status = AudioUnitInitialize(capture->unit);
+        if (status) return failed(status);
+        size = sizeof(capture->maximumFrames);
+        status = AudioUnitGetProperty(capture->unit, kAudioUnitProperty_MaximumFramesPerSlice,
+                                      kAudioUnitScope_Global, 0, &capture->maximumFrames, &size);
+        if (status) return failed(status);
+        if (!capture->maximumFrames || capture->maximumFrames > 65536) return failed(-50);
+        uint32_t queueFrames = pcmCapacity(std::max<uint32_t>(capture->maximumFrames * 4,
+            static_cast<uint32_t>(std::min(2.0 * capture->sampleRate, static_cast<double>(maximumPcmCapacity)))));
+        capture->queue = std::make_unique<EPPcmBridge>(capture->channels, queueFrames);
+        capture->scratch.resize(static_cast<size_t>(capture->channels) * capture->maximumFrames);
+        capture->storage.count = capture->channels;
+        for (uint32_t channel = 0; channel < capture->channels; ++channel)
+            capture->storage.buffers[channel].mNumberChannels = 1;
+        return capture.release();
+    } catch (...) { if (error) *error = -108; return nullptr; }
+}
+
+double ep_input_sample_rate(EPInputCapture *capture) { return capture ? capture->sampleRate : 0; }
+uint32_t ep_input_channels(EPInputCapture *capture) { return capture ? capture->channels : 0; }
+uint32_t ep_input_maximum_frames(EPInputCapture *capture) { return capture ? capture->maximumFrames : 0; }
+int32_t ep_input_start(EPInputCapture *capture) {
+    if (!capture || capture->running) return -50;
+    capture->queue->clear();
+    capture->observedClock = false;
+    capture->expectedSampleTime = 0;
+    capture->previousHostTime = 0;
+    capture->nextDeviceCheck = {};
+    OSStatus status = AudioOutputUnitStart(capture->unit);
+    if (!status) capture->running = true;
+    else capture->queue->fail(status);
+    return status;
+}
+int32_t ep_input_stop(EPInputCapture *capture) {
+    if (!capture) return -50;
+    if (!capture->running) return noErr;
+    OSStatus status = AudioOutputUnitStop(capture->unit);
+    if (!status) capture->running = false;
+    else capture->queue->fail(status);
+    return status;
+}
+int32_t ep_input_destroy(EPInputCapture *capture) {
+    if (!capture) return noErr;
+    // Never release callback state if the driver refuses to dispose its unit.
+    OSStatus status = capture->releaseUnit();
+    if (!status) delete capture;
+    else capture->queue->fail(status);
+    return status;
+}
+uint32_t ep_input_available(EPInputCapture *capture) { return capture ? capture->queue->available() : 0; }
+uint32_t ep_input_read(EPInputCapture *capture, AudioBufferList *buffers, uint32_t maximumFrames) {
+    return capture ? capture->queue->read(buffers, maximumFrames, false) : 0;
+}
+int32_t ep_input_error(EPInputCapture *capture) {
+    if (!capture) return -50;
+    int32_t status = capture->queue->error.load(std::memory_order_acquire);
+    if (status || !capture->running) return status;
+    auto now = std::chrono::steady_clock::now();
+    if (now < capture->nextDeviceCheck) return capture->queue->error.load(std::memory_order_acquire);
+    capture->nextDeviceCheck = now + std::chrono::milliseconds(100);
+    // Device disappearance and rate changes invalidate the fixed-rate queue. This
+    // control-thread check avoids any hardware property calls in the input proc.
+    UInt32 alive = 0, size = sizeof(alive);
+    AudioObjectPropertyAddress address{kAudioDevicePropertyDeviceIsAlive, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
+    status = AudioObjectGetPropertyData(capture->device, &address, 0, nullptr, &size, &alive);
+    if (!status && !alive) status = inputDeviceError;
+    if (!status) {
+        Float64 rate = 0;
+        address.mSelector = kAudioDevicePropertyNominalSampleRate;
+        size = sizeof(rate);
+        status = AudioObjectGetPropertyData(capture->device, &address, 0, nullptr, &size, &rate);
+        if (!status && (!std::isfinite(rate) || std::abs(rate - capture->sampleRate) > 0.5)) status = inputDeviceError;
+    }
+    if (!status) {
+        UInt32 running = 0;
+        size = sizeof(running);
+        status = AudioUnitGetProperty(capture->unit, kAudioOutputUnitProperty_IsRunning,
+                                      kAudioUnitScope_Global, 0, &running, &size);
+        if (!status && !running) status = inputDeviceError;
+    }
+    if (status) capture->queue->fail(status);
+    return capture->queue->error.load(std::memory_order_acquire);
 }

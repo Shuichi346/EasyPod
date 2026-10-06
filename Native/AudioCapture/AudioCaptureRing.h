@@ -74,6 +74,39 @@ void ep_playback_meter(EPPlaybackHandoff *handoff, const AudioBufferList *buffer
 void ep_playback_complete(EPPlaybackHandoff *handoff, uint64_t generation);
 EPPlaybackStatus ep_playback_status(EPPlaybackHandoff *handoff, uint64_t generation);
 
+typedef struct EPInputCapture EPInputCapture;
+// Own one physical input only. Creation, start, stop, error checks, and destruction
+// belong to one serial control owner; output and system device settings are untouched.
+EPInputCapture *ep_input_create(uint32_t deviceID, int32_t *error);
+double ep_input_sample_rate(EPInputCapture *capture);
+uint32_t ep_input_channels(EPInputCapture *capture);
+uint32_t ep_input_maximum_frames(EPInputCapture *capture);
+int32_t ep_input_start(EPInputCapture *capture);
+int32_t ep_input_stop(EPInputCapture *capture);
+// A failure retains the handle and callback state; report it and retry on its owner.
+int32_t ep_input_destroy(EPInputCapture *capture);
+uint32_t ep_input_available(EPInputCapture *capture);
+uint32_t ep_input_read(EPInputCapture *capture, AudioBufferList *buffers, uint32_t maximumFrames);
+int32_t ep_input_error(EPInputCapture *capture);
+
+typedef struct EPPcmBridge EPPcmBridge;
+// Exactly one producer and consumer copy Float32 PCM through this bounded queue.
+// ABL channel counts must match the configured count, whether planar or interleaved.
+EPPcmBridge *ep_pcm_create(uint32_t channels, uint32_t capacityFrames);
+void ep_pcm_destroy(EPPcmBridge *bridge);
+bool ep_pcm_push(EPPcmBridge *bridge, const AudioBufferList *buffers, uint32_t frames);
+uint32_t ep_pcm_available(EPPcmBridge *bridge);
+int32_t ep_pcm_error(EPPcmBridge *bridge);
+// Copy only queued frames, without synthesizing silence. Restore ABL capacities before reuse.
+uint32_t ep_pcm_read(EPPcmBridge *bridge, AudioBufferList *buffers, uint32_t maximumFrames);
+// Clear and destruction require both producer and consumer to be quiescent.
+void ep_pcm_clear(EPPcmBridge *bridge);
+// Underflow renders silence; overflow and malformed buffers remain visible errors.
+OSStatus ep_pcm_render(EPPcmBridge *bridge, AudioBufferList *buffers, uint32_t frames);
+// Manual processing must never insert silence into a recorded source. A deficit
+// fails visibly with -71006 and consumes no queued frames.
+OSStatus ep_pcm_render_strict(EPPcmBridge *bridge, AudioBufferList *buffers, uint32_t frames);
+
 #ifdef __cplusplus
 }
 #endif

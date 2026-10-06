@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Separated microphone capture from Bluetooth playback using input-only AUHAL, preserving native microphone rates, live effects, and optional monitoring without requiring a combined input/output route.
+- Kept resampler padding out of recorded audio and rechecked fresh audio clocks after delayed UI scheduling before reporting startup failure.
+
 - Fixed Product > Archive linking by restricting the app and test targets to Apple Silicon, matching the bundled native libraries.
 - Set Music as the app category and version 1.0.0/build 1 through editable Xcode target settings; skipped unused App Intents metadata extraction to clear archive warnings.
 - Added the selected flat purple recording/waveform app icon.
