@@ -15,6 +15,7 @@ struct TranscriptRefinementService: Sendable {
 
   func recognize(
     source: URL, modelPath: String,
+    language: TranscriptionLanguage = .japanese,
     onProgress: @escaping @Sendable (Double) -> Void = { _ in }
   ) async throws -> [TranscriptSegment] {
     let cancelled = TranscriptRefinementCancellation()
@@ -28,7 +29,8 @@ struct TranscriptRefinementService: Sendable {
         queue.async {
           do {
             let worker = TranscriptRefinementWorker(
-              source: source, model: model, backend: factory(), cancelled: cancelled,
+              source: source, model: model, language: language, backend: factory(),
+              cancelled: cancelled,
               onProgress: onProgress)
             continuation.resume(returning: try worker.run())
           } catch { continuation.resume(throwing: error) }
@@ -51,7 +53,7 @@ struct TranscriptRefinementHypothesis: Sendable {
 
 /// Instances and native handles are used and closed exclusively on the worker's serial queue.
 protocol TranscriptRefinementBackend: AnyObject, Sendable {
-  func open(model: URL) throws
+  func open(model: URL, language: TranscriptionLanguage) throws
   func recognize(samples: [Float], sampleRate: Int32) throws -> TranscriptRefinementHypothesis
   func close()
 }
@@ -63,16 +65,19 @@ private final class TranscriptRefinementCancellation: Sendable {
 private final class TranscriptRefinementWorker {
   private let source: URL
   private let model: URL
+  private let language: TranscriptionLanguage
   private let backend: any TranscriptRefinementBackend
   private let cancelled: TranscriptRefinementCancellation
   private let onProgress: @Sendable (Double) -> Void
 
   init(
-    source: URL, model: URL, backend: any TranscriptRefinementBackend,
+    source: URL, model: URL, language: TranscriptionLanguage,
+    backend: any TranscriptRefinementBackend,
     cancelled: TranscriptRefinementCancellation, onProgress: @escaping @Sendable (Double) -> Void
   ) {
     self.source = source
     self.model = model
+    self.language = language
     self.backend = backend
     self.cancelled = cancelled
     self.onProgress = onProgress
@@ -95,7 +100,7 @@ private final class TranscriptRefinementWorker {
     // offline requests also limit PCM/attention memory and allow cancellation between calls.
     let maximumFrames = Int64(rate * 30)
     onProgress(0)
-    try backend.open(model: model)
+    try backend.open(model: model, language: language)
     try checkCancellation()
     var cursor: Int64 = 0
     var segments: [TranscriptSegment] = []
@@ -180,8 +185,10 @@ private final class NativeTranscriptRefinementBackend: TranscriptRefinementBacke
   @unchecked Sendable
 {
   private var recognizer: OpaquePointer?
+  private var language: TranscriptionLanguage = .japanese
 
-  func open(model: URL) throws {
+  func open(model: URL, language: TranscriptionLanguage) throws {
+    self.language = language
     do { try load(model: model, gpu: 0) } catch { try load(model: model, gpu: -1) }
   }
 
@@ -217,7 +224,7 @@ private final class NativeTranscriptRefinementBackend: TranscriptRefinementBacke
     options.enable_automatic_punctuation = true
     var result: OpaquePointer?
     defer { if let result { nemo_speech_asr_result_destroy(result) } }
-    let status = "ja-JP".withCString { language in
+    let status = language.rawValue.withCString { language in
       options.language_code = language
       return samples.withUnsafeBufferPointer { pcm in
         nemo_speech_asr_recognize_f32(

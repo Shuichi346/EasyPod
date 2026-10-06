@@ -1,5 +1,19 @@
 import Foundation
 
+enum TranscriptionLanguage: String, CaseIterable, Sendable {
+  case auto = "auto"
+  case japanese = "ja-JP"
+  case english = "en-US"
+
+  var label: String {
+    switch self {
+    case .auto: "オート"
+    case .japanese: "日本語"
+    case .english: "英語"
+    }
+  }
+}
+
 enum ExportFormat: String, Codable, CaseIterable, Sendable {
   case wav, m4a
   var label: String { rawValue.uppercased() }

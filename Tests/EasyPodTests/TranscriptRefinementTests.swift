@@ -6,6 +6,25 @@ import XCTest
 @testable import EasyPod
 
 @MainActor final class TranscriptRefinementTests: XCTestCase {
+  func testSelectedLanguagesInNativeOfflineRecognition() async throws {
+    let cases: [(TranscriptionLanguage, String, String)] = [
+      (.japanese, "japanese-speech", "日本語"), (.auto, "japanese-speech", "日本語"),
+      (.english, "english-speech", "english"), (.auto, "english-speech", "english"),
+    ]
+    for (language, name, expected) in cases {
+      let source = try XCTUnwrap(
+        Bundle(for: TranscriptRefinementTests.self).url(forResource: name, withExtension: "aiff"))
+      let original = try Data(contentsOf: source)
+      let segments = try await TranscriptRefinementService().recognize(
+        source: source, modelPath: UserPath.defaultModel, language: language)
+      XCTAssertTrue(
+        segments.map(\.text).joined().lowercased().contains(expected),
+        "\(name)/\(language): \(segments)")
+      XCTAssertTrue(segments.allSatisfy { $0.isFinal && $0.end >= $0.start })
+      XCTAssertEqual(try Data(contentsOf: source), original)
+    }
+  }
+
   func testJapaneseOfflineRecognitionPreservesSource() async throws {
     let fixture = try XCTUnwrap(
       Bundle(for: TranscriptRefinementTests.self).url(
@@ -182,7 +201,7 @@ private final class RefinementTestBackend: TranscriptRefinementBackend, @uncheck
     self.failAtCall = failAtCall
   }
 
-  func open(model: URL) throws {}
+  func open(model: URL, language: TranscriptionLanguage) throws {}
 
   func recognize(samples: [Float], sampleRate: Int32) throws -> TranscriptRefinementHypothesis {
     let call = state.withLock {

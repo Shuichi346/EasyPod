@@ -378,7 +378,7 @@ import XCTest
 }
 
 private final class StoreRefinementBackend: TranscriptRefinementBackend, Sendable {
-  func open(model: URL) throws {}
+  func open(model: URL, language: TranscriptionLanguage) throws {}
   func recognize(samples: [Float], sampleRate: Int32) throws -> TranscriptRefinementHypothesis {
     .init(text: "清書した文字", start: 0, end: Double(samples.count) / Double(sampleRate))
   }

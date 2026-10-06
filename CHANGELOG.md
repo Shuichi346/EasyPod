@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added saved Auto/Japanese/English language selection in transcription settings for both live recognition and offline refinement; retained Japanese as the default.
 - Separated microphone capture from Bluetooth playback using input-only AUHAL, preserving native microphone rates, live effects, and optional monitoring without requiring a combined input/output route.
 - Kept resampler padding out of recorded audio and rechecked fresh audio clocks after delayed UI scheduling before reporting startup failure.
 

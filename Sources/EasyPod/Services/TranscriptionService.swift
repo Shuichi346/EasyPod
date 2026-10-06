@@ -14,6 +14,7 @@ import Synchronization
 
   func start(
     modelPath: String, source: URL, sampleRate: Double,
+    language: TranscriptionLanguage = .japanese,
     beforePush: (@Sendable () -> Void)? = nil
   ) {
     segments = []
@@ -22,7 +23,8 @@ import Synchronization
     lastSequence = 0
     let current = generation
     let newWorker = ASRWorker(
-      model: UserPath.url(modelPath), source: source, rate: sampleRate, beforePush: beforePush
+      model: UserPath.url(modelPath), source: source, rate: sampleRate, language: language,
+      beforePush: beforePush
     ) {
       [weak self] snapshot in
       DispatchQueue.main.async {
@@ -69,6 +71,7 @@ private final class ASRWorker: @unchecked Sendable {
   private let model: URL
   private let source: URL
   private let rate: Double
+  private let language: TranscriptionLanguage
   private let beforePush: (@Sendable () -> Void)?
   private let event: @Sendable (ASRSnapshot) -> Void
   private var snapshot = ASRSnapshot(sequence: 0, segments: [], status: "モデルを読み込み中")
@@ -81,12 +84,14 @@ private final class ASRWorker: @unchecked Sendable {
   private var failed = false
 
   init(
-    model: URL, source: URL, rate: Double, beforePush: (@Sendable () -> Void)?,
+    model: URL, source: URL, rate: Double, language: TranscriptionLanguage,
+    beforePush: (@Sendable () -> Void)?,
     event: @escaping @Sendable (ASRSnapshot) -> Void
   ) {
     self.model = model
     self.source = source
     self.rate = rate
+    self.language = language
     self.beforePush = beforePush
     self.event = event
   }
@@ -152,7 +157,7 @@ private final class ASRWorker: @unchecked Sendable {
     var options = nemo_speech_asr_recognition_options_default()
     options.interim_results = true
     options.enable_word_time_offsets = true
-    let result = "ja-JP".withCString { language in
+    let result = language.rawValue.withCString { language in
       options.language_code = language
       return nemo_speech_asr_streaming_recognize(recognizer, &options, &stream)
     }

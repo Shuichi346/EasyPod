@@ -6,6 +6,64 @@ import XCTest
 @testable import EasyPod
 
 @MainActor final class TranscriptionTests: XCTestCase {
+  func testLanguagePreferencePersistsAndPreservesJapaneseDefault() throws {
+    let suite = "EasyPodLanguageTests-\(UUID())"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    XCTAssertEqual(PreferencesStore(defaults: defaults).transcriptionLanguage, .japanese)
+    for language in TranscriptionLanguage.allCases {
+      let preferences = PreferencesStore(defaults: defaults)
+      preferences.transcriptionLanguage = language
+      XCTAssertEqual(PreferencesStore(defaults: defaults).transcriptionLanguage, language)
+    }
+    defaults.set("unsupported", forKey: "transcriptionLanguage")
+    XCTAssertEqual(PreferencesStore(defaults: defaults).transcriptionLanguage, .japanese)
+  }
+
+  func testSelectedLanguagesSurviveStreamingPauseAndResume() async throws {
+    let cases: [(TranscriptionLanguage, String, String)] = [
+      (.japanese, "japanese-speech", "日本語"), (.auto, "japanese-speech", "日本語"),
+      (.english, "english-speech", "english"), (.auto, "english-speech", "english"),
+    ]
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "EasyPodLanguageStreaming-\(UUID())")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    for (language, name, expected) in cases {
+      let fixture = try XCTUnwrap(
+        Bundle(for: TranscriptionTests.self).url(forResource: name, withExtension: "aiff"))
+      let input = try AVAudioFile(forReading: fixture)
+      let source = directory.appendingPathComponent("\(name)-\(language.rawValue).caf")
+      do {
+        let output = try AVAudioFile(forWriting: source, settings: input.processingFormat.settings)
+        let buffer = try XCTUnwrap(
+          AVAudioPCMBuffer(pcmFormat: input.processingFormat, frameCapacity: UInt32(input.length)))
+        try input.read(into: buffer)
+        try output.write(from: buffer)
+        try output.write(from: buffer)
+      }
+      let original = try Data(contentsOf: source)
+      let service = TranscriptionService()
+      service.start(
+        modelPath: UserPath.defaultModel, source: source,
+        sampleRate: input.processingFormat.sampleRate, language: language)
+      await service.pause(frames: input.length)
+      XCTAssertEqual(service.status, "一時停止", "\(name)/\(language): \(service.status)")
+      let paused = service.segments
+      XCTAssertTrue(paused.map(\.text).joined().lowercased().contains(expected), "\(paused)")
+      await service.finish(frames: input.length * 2)
+      XCTAssertEqual(service.status, "文字起こし完了 · ローカル")
+      XCTAssertEqual(Array(service.segments.prefix(paused.count)), paused)
+      let resumed = Array(service.segments.dropFirst(paused.count))
+      XCTAssertTrue(resumed.map(\.text).joined().lowercased().contains(expected), "\(resumed)")
+      XCTAssertTrue(
+        resumed.allSatisfy {
+          $0.isFinal && $0.start >= Double(input.length) / input.processingFormat.sampleRate
+        })
+      XCTAssertEqual(try Data(contentsOf: source), original)
+    }
+  }
+
   func testJapaneseStreamingAndFinalFlush() async throws {
     let path = Bundle(for: TranscriptionTests.self).url(
       forResource: "japanese-speech", withExtension: "aiff")

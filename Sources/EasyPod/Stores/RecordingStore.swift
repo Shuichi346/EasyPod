@@ -286,7 +286,7 @@ enum RecordingLibraryFilter: Hashable {
         transcription.start(
           modelPath: preferences.modelPath,
           source: files.directory(session.id).appendingPathComponent("source.caf"),
-          sampleRate: settings.sampleRate)
+          sampleRate: settings.sampleRate, language: preferences.transcriptionLanguage)
       }
       logger.info("Recording started")
     } catch {
@@ -748,6 +748,7 @@ enum RecordingLibraryFilter: Hashable {
     refinementProgress = 0
     let source = files.directory(session.id).appendingPathComponent("source.caf")
     let model = preferences.modelPath
+    let language = preferences.transcriptionLanguage
     refinementTask = Task { [weak self] in
       guard let self else { return }
       defer {
@@ -758,7 +759,7 @@ enum RecordingLibraryFilter: Hashable {
       }
       do {
         let segments = try await self.refinement.recognize(
-          source: source, modelPath: model,
+          source: source, modelPath: model, language: language,
           onProgress: { [weak self] progress in
             Task { @MainActor in
               guard let self, self.refinementID == job else { return }

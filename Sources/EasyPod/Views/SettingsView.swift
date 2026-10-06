@@ -8,6 +8,13 @@ struct SettingsView: View {
     Form {
       Section("文字起こし") {
         Toggle("Nemotron 3.5 でローカル文字起こし", isOn: $store.preferences.transcriptionEnabled)
+        Picker("認識言語", selection: $store.preferences.transcriptionLanguage) {
+          ForEach(TranscriptionLanguage.allCases, id: \.self) { language in
+            Text(language.label).tag(language)
+          }
+        }
+        Text("オートは話された言語を自動判定します。録音中の文字起こしと清書に適用します。")
+          .font(.caption).foregroundStyle(.secondary)
         TextField("GGUF モデル", text: $store.preferences.modelPath)
         Button("モデルを選択…") {
           let panel = NSOpenPanel()
@@ -25,6 +32,7 @@ struct SettingsView: View {
         Text("長い余韻や無限の余韻は、この上限で書き出します。")
           .font(.caption).foregroundStyle(.secondary)
       }
-    }.formStyle(.grouped).padding().frame(width: 620, height: 330).disabled(store.isCapturing)
+    }.formStyle(.grouped).padding().frame(width: 620, height: 410)
+      .disabled(store.isCapturing || store.refining)
   }
 }
