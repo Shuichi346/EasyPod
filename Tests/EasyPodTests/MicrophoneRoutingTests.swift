@@ -521,6 +521,46 @@ private final class TestPCMHandle: @unchecked Sendable {
   init(_ pointer: OpaquePointer) { self.pointer = pointer }
 }
 
+// The manual-render serial owner alone mutates this deterministic latency/tail filter.
+private final class DelayTailCaptureState: @unchecked Sendable {
+  let feed: OpaquePointer
+  private let latencyFrames: Int
+  private let tailFrames: Int
+  private let capacity: Int
+  private let history: UnsafeMutablePointer<Float>
+  private var position = 0
+
+  init(feed: OpaquePointer, latencyFrames: Int, tailFrames: Int) {
+    self.feed = feed
+    self.latencyFrames = latencyFrames
+    self.tailFrames = tailFrames
+    capacity = latencyFrames + tailFrames + 1
+    history = .allocate(capacity: capacity)
+    history.initialize(repeating: 0, count: capacity)
+  }
+
+  deinit {
+    history.deinitialize(count: capacity)
+    history.deallocate()
+  }
+
+  func render(_ buffers: UnsafeMutablePointer<AudioBufferList>, frames: UInt32) -> OSStatus {
+    let code = ep_pcm_render_strict(feed, buffers, frames)
+    guard code == 0 else { return code }
+    guard buffers.pointee.mNumberBuffers == 1,
+      let samples = buffers.pointee.mBuffers.mData?.assumingMemoryBound(to: Float.self)
+    else { return -50 }
+    for index in 0..<Int(frames) {
+      history[position] = samples[index]
+      let delayed = (position + capacity - latencyFrames) % capacity
+      let tail = (delayed + capacity - tailFrames) % capacity
+      samples[index] = history[delayed] + 0.25 * history[tail]
+      position = (position + 1) % capacity
+    }
+    return 0
+  }
+}
+
 @MainActor
 final class SeparatedCaptureTests: XCTestCase {
   private nonisolated static func source(format: AVAudioFormat, handle: TestPCMHandle)
@@ -528,6 +568,109 @@ final class SeparatedCaptureTests: XCTestCase {
   {
     AVAudioSourceNode(format: format) { _, _, frames, buffers in
       ep_pcm_render_strict(handle.pointer, buffers, frames)
+    }
+  }
+
+  private nonisolated static func delayedSource(
+    format: AVAudioFormat, state: DelayTailCaptureState
+  ) -> AVAudioSourceNode {
+    AVAudioSourceNode(format: format) { _, _, frames, buffers in
+      state.render(buffers, frames: frames)
+    }
+  }
+
+  private func latencyTailFixture(paused: Bool, latencyFrames: Int, tailFrames: Int) async throws
+    -> (original: [Float], processed: [Float])
+  {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+      "PausedTailCapture-\(UUID())")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var code: Int32 = 0
+    let pointer = try XCTUnwrap(
+      directory.appendingPathComponent("source.caf").path.withCString { source in
+        directory.appendingPathComponent("processed.caf").path.withCString { processed in
+          ep_capture_create(source, processed, 48_000, 1, &code)
+        }
+      })
+    var finalized = false
+    defer { if !finalized { ep_capture_destroy(pointer) } }
+    let feed = try XCTUnwrap(ep_pcm_create(1, 16_384))
+    let monitor = try XCTUnwrap(ep_pcm_create(1, 32_768))
+    defer {
+      ep_pcm_destroy(feed)
+      ep_pcm_destroy(monitor)
+    }
+    let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1))
+    let engine = AVAudioEngine()
+    try engine.enableManualRenderingMode(.realtime, format: format, maximumFrameCount: 4096)
+    let state = DelayTailCaptureState(
+      feed: feed, latencyFrames: latencyFrames, tailFrames: tailFrames)
+    let source = Self.delayedSource(format: format, state: state)
+    engine.attach(source)
+    engine.connect(source, to: engine.mainMixerNode, format: format)
+    let pipeline = try CaptureInputPipeline(
+      input: BufferedCaptureInput(sampleRate: 48_000), writer: CaptureWriterHandle(pointer),
+      engine: engine, feed: feed, monitorFeed: monitor, format: format, processing: true)
+    let latency = Double(latencyFrames) / 48_000
+    let tail = Double(tailFrames) / 48_000
+    do {
+      try await pipeline.arm(latencyFrames: UInt64(latencyFrames), processed: true)
+      try await pipeline.start()
+      await pipeline.pause(latency: latency, tail: paused ? 0 : tail)
+      if paused { await pipeline.finishPaused(latency: latency, tail: tail) }
+      await pipeline.close()
+    } catch {
+      await pipeline.close()
+      throw error
+    }
+    let pipelineState = await pipeline.snapshot()
+    XCTAssertEqual(pipelineState.inputError, 0)
+    XCTAssertEqual(pipelineState.processingError, 0)
+    XCTAssertEqual(pipelineState.cleanupError, 0)
+    engine.detach(source)
+    let status = ep_capture_finalize(pointer)
+    finalized = true
+    XCTAssertEqual(status.sourceError, 0)
+    XCTAssertEqual(status.processedError, 0)
+    XCTAssertEqual(status.sourceFrames, 8192)
+    XCTAssertEqual(status.processedFrames, 8192 + Int64(tailFrames))
+
+    func samples(_ name: String) throws -> [Float] {
+      let file = try AVAudioFile(forReading: directory.appendingPathComponent(name))
+      let buffer = try XCTUnwrap(
+        AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: UInt32(file.length)))
+      try file.read(into: buffer)
+      let data = try XCTUnwrap(buffer.floatChannelData?[0])
+      return Array(UnsafeBufferPointer(start: data, count: Int(buffer.frameLength)))
+    }
+    return (try samples("source.caf"), try samples("processed.caf"))
+  }
+
+  func testPauseThenStopPreservesLatencyAndTailIncludingShortSource() async throws {
+    let tailFrames = 1536
+    // The second case ends before latency has elapsed; both use non-chunk-aligned latency.
+    for latencyFrames in [5280, 12_000] {
+      let continuous = try await latencyTailFixture(
+        paused: false, latencyFrames: latencyFrames, tailFrames: tailFrames)
+      let paused = try await latencyTailFixture(
+        paused: true, latencyFrames: latencyFrames, tailFrames: tailFrames)
+      XCTAssertEqual(continuous.original, paused.original)
+      XCTAssertEqual(continuous.processed.count, paused.processed.count)
+      var maximumError: Float = 0
+      for index in 0..<min(continuous.processed.count, paused.processed.count) {
+        let original = index < continuous.original.count ? continuous.original[index] : 0
+        let tailIndex = index - tailFrames
+        let tail =
+          tailIndex >= 0 && tailIndex < continuous.original.count
+          ? 0.25 * continuous.original[tailIndex] : 0
+        let expected = original + tail
+        maximumError = max(
+          maximumError, abs(continuous.processed[index] - expected),
+          abs(paused.processed[index] - expected))
+      }
+      XCTAssertLessThan(maximumError, 0.000001, "latencyFrames=\(latencyFrames)")
+      XCTAssertGreaterThan(abs(try XCTUnwrap(paused.processed.last)), 0.01)
     }
   }
 

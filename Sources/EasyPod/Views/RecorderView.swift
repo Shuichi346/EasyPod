@@ -81,6 +81,9 @@ struct RecorderView: View {
           title: "入力デバイス", selection: $store.preferences.inputID,
           choices: [("システムのマイク", UInt32?.none)]
             + store.inputDevices.map { ($0.name, Optional($0.id)) }
+            + (store.preferences.inputUID != nil
+              && !store.inputDevices.contains { $0.id == store.preferences.inputID }
+              ? [("選択したマイクは未接続です", store.preferences.inputID)] : [])
         )
         .disabled(store.isCapturing)
       }.frame(width: narrow ? 176 : 188, alignment: .leading)

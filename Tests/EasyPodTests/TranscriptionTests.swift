@@ -6,6 +6,73 @@ import XCTest
 @testable import EasyPod
 
 @MainActor final class TranscriptionTests: XCTestCase {
+  func testSnapshotMailboxRetainsLatestWithOneScheduledDelivery() {
+    let mailbox = ASRSnapshotMailbox()
+    for sequence in 1...1000 {
+      XCTAssertEqual(
+        mailbox.offer(ASRSnapshot(sequence: sequence, segments: [], status: "\(sequence)")),
+        sequence == 1)
+    }
+    XCTAssertFalse(mailbox.offer(ASRSnapshot(sequence: 500, segments: [], status: "stale")))
+    XCTAssertEqual(mailbox.take()?.sequence, 1000)
+    XCTAssertNil(mailbox.take())
+    XCTAssertTrue(mailbox.offer(ASRSnapshot(sequence: 1001, segments: [], status: "final")))
+    XCTAssertEqual(mailbox.take()?.status, "final")
+  }
+
+  func testResetClearsPreviousTranscriptAndRejectsQueuedOldRecording() async {
+    let service = TranscriptionService()
+    let old = TranscriptSegment(start: 0, end: 1, text: "Previous recording", isFinal: true)
+    service.segments = [old]
+    service.status = "文字起こし完了 · ローカル"
+    var changes = 0
+    service.onChange = { _, _ in changes += 1 }
+    let oldReceiver = service.snapshotReceiver()
+    oldReceiver(ASRSnapshot(sequence: 1, segments: [old], status: "old"))
+    service.resetForRecording(enabled: false)
+    await drainMainQueue()
+    XCTAssertTrue(service.segments.isEmpty)
+    XCTAssertEqual(service.status, "文字起こし オフ")
+    XCTAssertEqual(changes, 0)
+    service.resetForRecording(enabled: true)
+    XCTAssertEqual(service.status, "モデルを読み込み中")
+  }
+
+  func testCoalescedSnapshotsRetainFinalAndRejectDuplicateOrOlderSequence() async {
+    let service = TranscriptionService()
+    service.resetForRecording(enabled: true)
+    let final = TranscriptSegment(start: 0, end: 1, text: "Final text", isFinal: true)
+    let receiver = service.snapshotReceiver()
+    var changes = 0
+    service.onChange = { _, _ in changes += 1 }
+    for sequence in 1...1000 {
+      receiver(
+        ASRSnapshot(
+          sequence: sequence, segments: sequence == 1000 ? [final] : [],
+          status: sequence == 1000 ? "文字起こし完了 · ローカル" : "interim"))
+    }
+    await drainMainQueue()
+    XCTAssertEqual(changes, 1)
+    XCTAssertEqual(service.segments, [final])
+    XCTAssertEqual(service.status, "文字起こし完了 · ローカル")
+    receiver(ASRSnapshot(sequence: 1000, segments: [], status: "duplicate"))
+    receiver(ASRSnapshot(sequence: 999, segments: [], status: "stale"))
+    await drainMainQueue()
+    XCTAssertEqual(changes, 1)
+    XCTAssertEqual(service.segments, [final])
+    let resumed = TranscriptSegment(start: 1, end: 2, text: "Resumed text", isFinal: true)
+    receiver(ASRSnapshot(sequence: 1001, segments: [final, resumed], status: "一時停止"))
+    await drainMainQueue()
+    XCTAssertEqual(changes, 2)
+    XCTAssertEqual(service.segments, [final, resumed])
+  }
+
+  private func drainMainQueue() async {
+    await withCheckedContinuation { continuation in
+      DispatchQueue.main.async { continuation.resume() }
+    }
+  }
+
   func testLanguagePreferencePersistsAndPreservesJapaneseDefault() throws {
     let suite = "EasyPodLanguageTests-\(UUID())"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

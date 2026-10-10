@@ -1,7 +1,6 @@
 # EasyPod development
 
 - Use UTF-8 and English code comments describing behavior and rationale.
-- Read `~/.codex/docs/library-notes.md` and `~/.codex/docs/macos-gotchas.md` before coding.
 - `EasyPod.xcodeproj` with the shared EasyPod scheme is authoritative. `project.yml` is its reproducible XcodeGen specification; regenerate after adding sources. Use exposed Xcode MCP builds/diagnostics when the project is open. `script/build_and_run.sh` is the user Run action and CLI fallback. No SwiftPM app packaging.
 - Swift 6 language mode with the installed Swift 6.4 toolchain, arm64, macOS 26+. Keep `ARCHS: arm64` explicitly on both app and test targets in `project.yml`; XcodeGen's macOS app preset overrides project-only architecture settings. App state/UI use MainActor; native handles stay with their serial owner.
 - Keep version/build/category editable through the app target's `MARKETING_VERSION`, `CURRENT_PROJECT_VERSION`, and `INFOPLIST_KEY_LSApplicationCategoryType`; `Resources/Info.plist` expands these settings. Mirror any Xcode edits into `project.yml` before regeneration. Remove `LM_SKIP_METADATA_EXTRACTION` when adding App Intents; it is enabled only while all targets omit them.
@@ -14,6 +13,10 @@
 - Read export latency and tail after the export engine starts, for both offline rendering and realtime fallback. Preflight plugin allocation can report a different latency.
 - Close ASR results/streams/recognizers and VST3 views/components/controllers in ownership order. Keep original audio intact and never apply a saved live chain twice.
 - Keep transcription language in `PreferencesStore.transcriptionLanguage`, using `TranscriptionLanguage` values `auto`, `ja-JP`, and `en-US` for the C ABI's `language_code`. Preserve Japanese for missing/invalid preferences. Snapshot language at live/refinement job start and reuse it when reopening streams after pause; retain the C string through each native recognition/open call. Disable settings during capture and refinement.
+- Coalesce recording checkpoints on SessionFileService's serial persistence owner; explicit saves supersede pending snapshots. Await checkpoint/native completion before final manifest commit, and drain checkpoints before Trash.
+- Version asynchronous effect preparation by session and rack generation; discard stale success/errors. Keep export cancellation active from preparation through render cleanup.
+- Persist microphone selection by CoreAudio UID and resolve the current object ID at capture start; missing selected devices must not fall back to another microphone.
+- Validate the pinned NeMo version/header through script/prepare_native.sh; update the runtime distribution, headers and notices together after compatibility checks.
 - Keep UUID session directories stable. Persist folder assignments atomically in `.library-index.json`; move whole sessions to app-local `.Trash/<UUID>` for reversible deletion. Snapshot confirmation targets and complete throwing save preflight before batch moves; retain failed items on partial success.
 - Run offline refinement only after recording/finalization stops, using saved original audio and the configured local model. Replace text only after complete recognition and persistence succeed; retain original transcript/status, discard cancelled results, and await native-handle cleanup.
 - Give icon actions help/accessibility labels and full visible hit areas. Keep live-waveform animation in the UI; bound recent bars and freeze their motion during pause without changing saved-waveform playback.

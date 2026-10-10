@@ -12,26 +12,25 @@ import Synchronization
   private var generation = UUID()
   private var lastSequence = 0
 
+  func resetForRecording(enabled: Bool) {
+    // Reset presentation only after the previous worker has retired its native handles.
+    guard worker == nil else { return }
+    generation = UUID()
+    lastSequence = 0
+    segments = []
+    status = enabled ? "モデルを読み込み中" : "文字起こし オフ"
+  }
+
   func start(
     modelPath: String, source: URL, sampleRate: Double,
     language: TranscriptionLanguage = .japanese,
     beforePush: (@Sendable () -> Void)? = nil
   ) {
-    segments = []
-    status = "モデルを読み込み中"
-    generation = UUID()
-    lastSequence = 0
-    let current = generation
+    guard worker == nil else { return }
+    resetForRecording(enabled: true)
     let newWorker = ASRWorker(
       model: UserPath.url(modelPath), source: source, rate: sampleRate, language: language,
-      beforePush: beforePush
-    ) {
-      [weak self] snapshot in
-      DispatchQueue.main.async {
-        guard let self, self.generation == current else { return }
-        self.apply(snapshot)
-      }
-    }
+      beforePush: beforePush, event: snapshotReceiver())
     worker = newWorker
     newWorker.start()
   }
@@ -40,18 +39,36 @@ import Synchronization
 
   func pause(frames: Int64) async {
     guard let worker else { return }
-    apply(await worker.flush(frames: frames, stop: false))
+    let current = generation
+    let snapshot = await worker.flush(frames: frames, stop: false)
+    guard generation == current else { return }
+    apply(snapshot)
   }
 
   func finish(frames: Int64) async {
     guard let worker else { return }
+    let current = generation
     if !status.hasPrefix("文字起こし:") { status = "最後の発話を確定中" }
-    apply(await worker.flush(frames: frames, stop: true))
+    let snapshot = await worker.flush(frames: frames, stop: true)
+    guard generation == current else { return }
+    apply(snapshot)
     self.worker = nil
   }
 
+  func snapshotReceiver() -> @Sendable (ASRSnapshot) -> Void {
+    let current = generation
+    let mailbox = ASRSnapshotMailbox()
+    return { [weak self] snapshot in
+      guard mailbox.offer(snapshot) else { return }
+      DispatchQueue.main.async {
+        guard let snapshot = mailbox.take(), let self, self.generation == current else { return }
+        self.apply(snapshot)
+      }
+    }
+  }
+
   private func apply(_ snapshot: ASRSnapshot) {
-    guard snapshot.sequence >= lastSequence else { return }
+    guard snapshot.sequence > lastSequence else { return }
     lastSequence = snapshot.sequence
     segments = snapshot.segments
     status = snapshot.status
@@ -59,10 +76,39 @@ import Synchronization
   }
 }
 
-private struct ASRSnapshot: Sendable {
+struct ASRSnapshot: Sendable {
   var sequence: Int
   var segments: [TranscriptSegment]
   var status: String
+}
+
+/// Retains one newest snapshot and allows only one queued MainActor delivery per worker.
+final class ASRSnapshotMailbox: Sendable {
+  private struct State {
+    var latest: ASRSnapshot?
+    var scheduled = false
+  }
+
+  private let state = Mutex(State())
+
+  func offer(_ snapshot: ASRSnapshot) -> Bool {
+    state.withLock {
+      if let latest = $0.latest, latest.sequence > snapshot.sequence { return false }
+      $0.latest = snapshot
+      guard !$0.scheduled else { return false }
+      $0.scheduled = true
+      return true
+    }
+  }
+
+  func take() -> ASRSnapshot? {
+    state.withLock {
+      let latest = $0.latest
+      $0.latest = nil
+      $0.scheduled = false
+      return latest
+    }
+  }
 }
 
 private final class ASRWorker: @unchecked Sendable {
@@ -82,6 +128,8 @@ private final class ASRWorker: @unchecked Sendable {
   private var streamStart: Double = 0
   private var utteranceStart: Double = 0
   private var failed = false
+  private var mono = [Float](repeating: 0, count: 8_192)
+  private var inputBuffer: AVAudioPCMBuffer?
 
   init(
     model: URL, source: URL, rate: Double, language: TranscriptionLanguage,
@@ -176,27 +224,34 @@ private final class ASRWorker: @unchecked Sendable {
     guard target > cursor else { return }
     let file = try AVAudioFile(forReading: source)
     let end = min(file.length, target)
-    guard end > cursor,
-      let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 8_192)
-    else { return }
+    guard end > cursor else { return }
+    if inputBuffer?.format != file.processingFormat {
+      inputBuffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 8_192)
+    }
+    guard let buffer = inputBuffer else { return }
     try openStream()
     file.framePosition = cursor
     while cursor < end {
       try file.read(into: buffer, frameCount: AVAudioFrameCount(min(8_192, end - cursor)))
       guard buffer.frameLength > 0, let channels = buffer.floatChannelData else { break }
       let count = Int(buffer.frameLength)
-      var mono = [Float](repeating: 0, count: count)
-      for channel in 0..<Int(buffer.format.channelCount) {
-        for sample in 0..<count {
-          mono[sample] += channels[channel][sample] / Float(buffer.format.channelCount)
+      let channelCount = Int(buffer.format.channelCount)
+      if channelCount > 1 {
+        let scale = 1 / Float(channelCount)
+        for sample in 0..<count { mono[sample] = channels[0][sample] * scale }
+        for channel in 1..<channelCount {
+          for sample in 0..<count { mono[sample] += channels[channel][sample] * scale }
         }
       }
       updateLagStatus()
       // This optional test gate runs on the ASR queue, never on a realtime audio callback.
       beforePush?()
-      let result = mono.withUnsafeBufferPointer {
-        nemo_speech_asr_stream_push_f32(stream, $0.baseAddress, $0.count, Int32(rate))
-      }
+      let result =
+        channelCount == 1
+        ? nemo_speech_asr_stream_push_f32(stream, channels[0], count, Int32(rate))
+        : mono.withUnsafeBufferPointer {
+          nemo_speech_asr_stream_push_f32(stream, $0.baseAddress, count, Int32(rate))
+        }
       guard result == NEMO_SPEECH_ASR_OK else { throw lastError() }
       cursor += Int64(count)
       try drain()
@@ -265,7 +320,7 @@ private final class ASRWorker: @unchecked Sendable {
     snapshot.sequence += 1
     snapshot.status = status
     if let segment {
-      snapshot.segments.removeAll { !$0.isFinal }
+      if snapshot.segments.last?.isFinal == false { snapshot.segments.removeLast() }
       if !segment.text.isEmpty { snapshot.segments.append(segment) }
     }
     event(snapshot)
@@ -280,6 +335,7 @@ private final class ASRWorker: @unchecked Sendable {
   private func close() {
     timer?.cancel()
     timer = nil
+    inputBuffer = nil
     if let stream {
       nemo_speech_asr_stream_close(stream)
       self.stream = nil

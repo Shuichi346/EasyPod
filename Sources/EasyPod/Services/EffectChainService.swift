@@ -30,6 +30,7 @@ final class EffectChainService {
     EPVST3AudioUnit.registerComponent()
     var nodes: [EffectChain.Entry] = []
     for slot in slots {
+      try Task.checkCancellation()
       if let reason = slot.plugin.unavailableReason { throw EffectChainError.unavailable(reason) }
       let unit: AVAudioUnit
       if slot.plugin.format == .vst3 {
@@ -40,6 +41,7 @@ final class EffectChainService {
         }
         unit = try await AVAudioUnit.instantiate(
           with: EPVST3AudioUnit.componentDescription(), options: [])
+        try Task.checkCancellation()
         guard let adapter = unit.auAudioUnit as? EPVST3AudioUnit else {
           throw EffectChainError.unavailable("VST3 ホストを初期化できません。")
         }
@@ -57,6 +59,7 @@ final class EffectChainService {
           componentFlags: 0, componentFlagsMask: 0)
         unit = try await AVAudioUnit.instantiate(with: description, options: [])
       }
+      try Task.checkCancellation()
       let au = unit.auAudioUnit
       au.isRenderingOffline = offline
       au.maximumFramesToRender = 4096

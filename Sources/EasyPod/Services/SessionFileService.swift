@@ -1,8 +1,10 @@
 import AVFoundation
 import Foundation
+import Synchronization
 
 @MainActor final class SessionFileService {
   let root: URL
+  private let persistence: SessionPersistence
 
   private struct LibraryIndex: Codable {
     var version = 1
@@ -13,12 +15,13 @@ import Foundation
   private var indexURL: URL { root.appendingPathComponent(".library-index.json") }
   private var trashRoot: URL { root.appendingPathComponent(".Trash", isDirectory: true) }
 
-  init(root: URL? = nil) throws {
+  init(root: URL? = nil, checkpointDelay: TimeInterval = 0.25) throws {
     self.root =
       root
       ?? FileManager.default.homeDirectoryForCurrentUser
       .appendingPathComponent("Library/Application Support/EasyPod/Sessions", isDirectory: true)
     try FileManager.default.createDirectory(at: self.root, withIntermediateDirectories: true)
+    persistence = SessionPersistence(root: self.root, delay: checkpointDelay)
   }
 
   func directory(_ id: UUID) -> URL {
@@ -26,21 +29,17 @@ import Foundation
   }
 
   func save(_ session: RecordingSession) throws {
-    // A delayed transcription result must not recreate an already trashed recording.
-    guard !FileManager.default.fileExists(atPath: trashDirectory(session.id).path) else {
-      throw EasyPodError.message("この録音はゴミ箱にあります。復元してから変更してください。")
-    }
-    let folder = directory(session.id)
-    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-    try requireDirectory(folder)
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    try encoder.encode(session.transcript).write(
-      to: folder.appendingPathComponent("transcript.json"), options: .atomic)
-    // The manifest commits the whole session last; the sidecar is only a recovery copy.
-    try encoder.encode(session).write(
-      to: folder.appendingPathComponent("session.json"), options: .atomic)
+    try persistence.save(session)
   }
+
+  // Only the latest checkpoint is retained; explicit saves supersede it on the same owner.
+  func checkpoint(_ session: RecordingSession, onFailure: @escaping @Sendable (String) -> Void) {
+    persistence.checkpoint(session, onFailure: onFailure)
+  }
+
+  func flushCheckpoints() async throws { try await persistence.flush() }
+
+  var checkpointWriteCount: Int { persistence.checkpointWriteCount }
 
   func load() throws -> [RecordingSession] {
     try loadSessions(at: root)
@@ -101,6 +100,7 @@ import Foundation
   }
 
   func trash(_ id: UUID) throws {
+    try persistence.finishCheckpoint(for: id)
     let source = directory(id)
     try requireDirectory(source)
     let destination = trashDirectory(id)
@@ -278,5 +278,110 @@ import Foundation
       sessions.append(session)
     }
     return sessions.sorted { $0.createdAt > $1.createdAt }
+  }
+}
+
+// Encoding and file replacement run on one serial owner, outside the UI and audio callbacks.
+private final class SessionPersistence: @unchecked Sendable {
+  private struct Pending: Sendable {
+    let session: RecordingSession
+    let onFailure: @Sendable (String) -> Void
+  }
+  private struct State: Sendable {
+    var pending: Pending?
+    var scheduled = false
+  }
+  private let root: URL
+  private let delay: TimeInterval
+  private let queue = DispatchQueue(label: "local.EasyPod.session.persistence", qos: .utility)
+  private let state = Mutex(State())
+  private var failures: [UUID: String] = [:]
+  private var writes = 0
+
+  init(root: URL, delay: TimeInterval) {
+    self.root = root
+    self.delay = max(0, delay)
+  }
+
+  var checkpointWriteCount: Int { queue.sync { writes } }
+
+  func checkpoint(_ session: RecordingSession, onFailure: @escaping @Sendable (String) -> Void) {
+    let schedule = state.withLock { state in
+      state.pending = Pending(session: session, onFailure: onFailure)
+      guard !state.scheduled else { return false }
+      state.scheduled = true
+      return true
+    }
+    if schedule { queue.asyncAfter(deadline: .now() + delay) { self.drain() } }
+  }
+
+  func save(_ session: RecordingSession) throws {
+    try queue.sync {
+      // A delayed recording checkpoint must never overwrite a final manifest or restored text.
+      state.withLock { if $0.pending?.session.id == session.id { $0.pending = nil } }
+      if let failure = failures.removeValue(forKey: session.id) {
+        throw EasyPodError.message(failure)
+      }
+      try write(session)
+    }
+  }
+
+  func finishCheckpoint(for id: UUID) throws {
+    try queue.sync {
+      drain()
+      if let reason = failures.removeValue(forKey: id) { throw EasyPodError.message(reason) }
+    }
+  }
+
+  func flush() async throws {
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      queue.async {
+        self.drain()
+        if let failure = self.failures.first {
+          self.failures.removeValue(forKey: failure.key)
+          continuation.resume(throwing: EasyPodError.message(failure.value))
+        } else {
+          continuation.resume()
+        }
+      }
+    }
+  }
+
+  private func drain() {
+    let pending = state.withLock { state in
+      let value = state.pending
+      state.pending = nil
+      state.scheduled = false
+      return value
+    }
+    guard let pending else { return }
+    do {
+      try write(pending.session)
+      writes += 1
+    } catch {
+      let reason = error.localizedDescription
+      failures[pending.session.id] = reason
+      pending.onFailure(reason)
+    }
+  }
+
+  private func write(_ session: RecordingSession) throws {
+    let trash = root.appendingPathComponent(".Trash").appendingPathComponent(session.id.uuidString)
+    guard !FileManager.default.fileExists(atPath: trash.path) else {
+      throw EasyPodError.message("この録音はゴミ箱にあります。復元してから変更してください。")
+    }
+    let folder = root.appendingPathComponent(session.id.uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let values = try folder.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+    guard values.isDirectory == true, values.isSymbolicLink != true else {
+      throw EasyPodError.message("録音の保存先が通常のフォルダーではありません。")
+    }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    try encoder.encode(session.transcript).write(
+      to: folder.appendingPathComponent("transcript.json"), options: .atomic)
+    // The manifest commits last; the sidecar remains a recovery copy.
+    try encoder.encode(session).write(
+      to: folder.appendingPathComponent("session.json"), options: .atomic)
   }
 }

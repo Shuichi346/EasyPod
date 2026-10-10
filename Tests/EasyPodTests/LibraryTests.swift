@@ -248,4 +248,48 @@ import XCTest
     XCTAssertEqual(loaded.originalTranscript, original.transcript)
     XCTAssertEqual(loaded.originalTranscriptionStatus, original.transcriptionStatus)
   }
+
+  func testCheckpointCoalescingFinalCommitAndTrashOrdering() async throws {
+    let root = try temporaryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let files = try SessionFileService(root: root, checkpointDelay: 10)
+    var session = try completedSession(in: files)
+    for index in 0..<1000 {
+      session.transcriptionStatus = "Checkpoint \(index)"
+      files.checkpoint(session) { _ in XCTFail("Unexpected checkpoint failure") }
+    }
+    try await files.flushCheckpoints()
+    XCTAssertEqual(files.checkpointWriteCount, 1)
+    XCTAssertEqual(try files.load().first?.transcriptionStatus, "Checkpoint 999")
+    files.checkpoint(session) { _ in XCTFail("Unexpected checkpoint failure") }
+    session.transcriptionStatus = "Committed final"
+    try files.save(session)
+    try await files.flushCheckpoints()
+    XCTAssertEqual(try files.load().first?.transcriptionStatus, "Committed final")
+    session.transcriptionStatus = "Before Trash"
+    files.checkpoint(session) { _ in XCTFail("Unexpected checkpoint failure") }
+    try files.trash(session.id)
+    try await files.flushCheckpoints()
+    XCTAssertFalse(FileManager.default.fileExists(atPath: files.directory(session.id).path))
+    XCTAssertEqual(try files.loadTrashed().first?.transcriptionStatus, "Before Trash")
+  }
+
+  func testCheckpointFailurePropagatesBeforeFinalCommitAndPreservesManifest() async throws {
+    let root = try temporaryRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let files = try SessionFileService(root: root, checkpointDelay: 10)
+    var session = try completedSession(in: files)
+    let original = session.transcript
+    let sidecar = files.directory(session.id).appendingPathComponent("transcript.json")
+    try FileManager.default.removeItem(at: sidecar)
+    try FileManager.default.createDirectory(at: sidecar, withIntermediateDirectories: false)
+    session.transcript = [TranscriptSegment(start: 0, end: 1, text: "Uncommitted", isFinal: true)]
+    files.checkpoint(session) { _ in }
+    do {
+      try await files.flushCheckpoints()
+      XCTFail("A failed sidecar must be reported")
+    } catch {}
+    XCTAssertEqual(try files.load().first?.transcript, original)
+  }
+
 }

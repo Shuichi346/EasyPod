@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Prevented delayed effect preparation from replacing another recording's chain, refreshed VST3 bulk preset values before saving, and preserved effect tails when stopping a paused recording.
+- Cleared stale transcript presentation for recordings with transcription disabled and made export cancellation cover effect preparation.
+- Coalesced recording checkpoints on a serial persistence owner, bounded transcript update delivery, cached/cancelled waveform scans, reused worker audio buffers, and removed quadratic VST3 parameter transfer.
+- Persisted microphone selection by CoreAudio UID and validated the verified NeMo 0.2.0 version/header during native preparation.
+
 - Added saved Auto/Japanese/English language selection in transcription settings for both live recognition and offline refinement; retained Japanese as the default.
 - Separated microphone capture from Bluetooth playback using input-only AUHAL, preserving native microphone rates, live effects, and optional monitoring without requiring a combined input/output route.
 - Kept resampler padding out of recorded audio and rechecked fresh audio clocks after delayed UI scheduling before reporting startup failure.

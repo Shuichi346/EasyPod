@@ -62,12 +62,21 @@ enum RecordingLibraryFilter: Hashable {
   private let capture = AudioCaptureService()
   private let playback: PlaybackService
   private let exporter = AudioExportService()
-  private let effectService = EffectChainService()
+  typealias ChainBuilder = @MainActor ([EffectSlot], Double, Int, Bool) async throws -> EffectChain
+  private let chainBuilder: ChainBuilder
   private let catalog = PluginCatalogService()
   private var chain: EffectChain?
   private var activeID: UUID?
   private var terminating = false
   private var playbackGeneration = UUID()
+  private var effectPreparationGeneration = UUID()
+  private var waveformTask: Task<Void, Never>?
+  private var waveformGeneration = UUID()
+  private var exportJob: UUID?
+  private var exportCancelled = false
+  private var exportPreparationTask: Task<EffectChain, Error>?
+  private var recordingTranscriptionEnabled = false
+  private var lastTranscriptFinalCount = 0
   private var lastSavedFrame: Int64 = 0
   private let logger = Logger(subsystem: "local.EasyPod", category: "session")
 
@@ -133,12 +142,18 @@ enum RecordingLibraryFilter: Hashable {
     preferences: PreferencesStore? = nil,
     playback: PlaybackService? = nil,
     refinement: TranscriptRefinementService = TranscriptRefinementService(),
+    chainBuilder: ChainBuilder? = nil,
     permissionRequest: @escaping @MainActor () async -> Bool = {
       await AudioDeviceService.requestPermission()
     }
   ) {
     self.playback = playback ?? PlaybackService()
     self.refinement = refinement
+    self.chainBuilder =
+      chainBuilder ?? { slots, rate, channels, offline in
+        try await EffectChainService().build(
+          slots: slots, sampleRate: rate, channels: channels, offline: offline)
+      }
     self.permissionRequest = permissionRequest
     self.customMarker = sessionRoot?.appendingPathComponent(".active-recording")
     if let preferences { self.preferences = preferences }
@@ -157,12 +172,19 @@ enum RecordingLibraryFilter: Hashable {
       else { return }
       self.sessions[index].transcript = segments
       self.sessions[index].transcriptionStatus = status
-      self.persist(self.sessions[index])
+      let finalCount = segments.count - (segments.last?.isFinal == false ? 1 : 0)
+      if finalCount != self.lastTranscriptFinalCount || status.hasPrefix("文字起こし:") {
+        self.lastTranscriptFinalCount = finalCount
+        self.checkpoint(self.sessions[index])
+      }
     }
     refreshInputs()
   }
 
-  func refreshInputs() { inputDevices = AudioDeviceService.inputs() }
+  func refreshInputs() {
+    inputDevices = AudioDeviceService.inputs()
+    preferences.refreshInputIdentity()
+  }
 
   func select(_ id: UUID) {
     guard canOrganize, visibleSessions.contains(where: { $0.id == id }) else { return }
@@ -187,6 +209,7 @@ enum RecordingLibraryFilter: Hashable {
   }
 
   private func displaySelection(_ id: UUID) {
+    cancelWaveform()
     stopPlayback()
     saveEffects()
     selectedID = id
@@ -198,10 +221,13 @@ enum RecordingLibraryFilter: Hashable {
     peaks = []
     phase = selected.status == .interrupted ? .interrupted : .completed
     if let directory = selectedDirectory {
-      Task { [weak self] in
+      let generation = waveformGeneration
+      waveformTask = Task { [weak self] in
         let waveform = try? await WaveformService.load(
           directory.appendingPathComponent("source.caf"))
-        guard let self, self.selectedID == id, !self.isCapturing else { return }
+        guard !Task.isCancelled, let self, self.waveformGeneration == generation,
+          self.selectedID == id, !self.isCapturing
+        else { return }
         self.peaks = waveform ?? []
       }
     }
@@ -215,6 +241,7 @@ enum RecordingLibraryFilter: Hashable {
   }
 
   private func clearSelection() {
+    cancelWaveform()
     stopPlayback()
     saveEffects()
     selectedID = nil
@@ -238,6 +265,7 @@ enum RecordingLibraryFilter: Hashable {
   func start() async {
     guard !terminating, canOrganize, libraryFilter != .trash, let files else { return }
     stopPlayback()
+    cancelWaveform()
     phase = .preparing
     do {
       let allowed = await permissionRequest()
@@ -254,14 +282,16 @@ enum RecordingLibraryFilter: Hashable {
       let live = settings.effectTiming == .duringRecording
       let newChain =
         live
-        ? try await effectService.build(
-          slots: effects, sampleRate: settings.sampleRate, channels: settings.channels) : nil
+        ? try await chainBuilder(effects, settings.sampleRate, settings.channels, false) : nil
       guard !terminating else {
         phase = .idle
         return
       }
+      recordingTranscriptionEnabled = preferences.transcriptionEnabled
+      transcription.resetForRecording(enabled: recordingTranscriptionEnabled)
+      lastTranscriptFinalCount = 0
       var session = RecordingSession(title: title, settings: settings, effects: effects)
-      session.transcriptionStatus = preferences.transcriptionEnabled ? "モデルを読み込み中" : "文字起こし オフ"
+      session.transcriptionStatus = transcription.status
       if session.title == "新しい録音" {
         session.title = Date.now.formatted(.dateTime.month().day().hour().minute()) + " の録音"
       }
@@ -279,10 +309,10 @@ enum RecordingLibraryFilter: Hashable {
       chain = newChain
       try await capture.start(
         directory: files.directory(session.id), settings: settings,
-        inputID: preferences.inputID, effects: newChain, monitor: monitor,
+        inputID: try preferences.captureInputID(), effects: newChain, monitor: monitor,
         onUpdate: { [weak self] update in self?.captureUpdated(update) })
       phase = .recording
-      if preferences.transcriptionEnabled {
+      if recordingTranscriptionEnabled {
         transcription.start(
           modelPath: preferences.modelPath,
           source: files.directory(session.id).appendingPathComponent("source.caf"),
@@ -379,11 +409,14 @@ enum RecordingLibraryFilter: Hashable {
     }
     let finalFrames = result?.frameCount ?? sessions.first(where: { $0.id == id })?.frameCount ?? 0
     await transcription.finish(frames: finalFrames)
+    do { try await files?.flushCheckpoints() } catch {
+      persistenceFailed(id: id, reason: error.localizedDescription)
+    }
     saveEffects()
     let sourceComplete = result?.sourceComplete == true
     var finalPhase: TransportPhase = sourceComplete ? .completed : .interrupted
     if let index = sessions.firstIndex(where: { $0.id == id }) {
-      if preferences.transcriptionEnabled { sessions[index].transcript = transcription.segments }
+      if recordingTranscriptionEnabled { sessions[index].transcript = transcription.segments }
       sessions[index].status = sourceComplete ? .completed : .interrupted
       do {
         try files?.save(sessions[index])
@@ -430,7 +463,6 @@ enum RecordingLibraryFilter: Hashable {
     saveEffects()
     effects.append(EffectSlot(plugin: plugin))
     await prepareEditorChain()
-    persistEffects()
   }
 
   func removeEffect(_ id: UUID) async {
@@ -439,7 +471,6 @@ enum RecordingLibraryFilter: Hashable {
     saveEffects()
     effects.removeAll { $0.id == id }
     await prepareEditorChain()
-    persistEffects()
   }
 
   func moveEffect(_ id: UUID, delta: Int) async {
@@ -450,13 +481,13 @@ enum RecordingLibraryFilter: Hashable {
     saveEffects()
     effects.swapAt(index, index + delta)
     await prepareEditorChain()
-    persistEffects()
   }
 
   func bypass(_ id: UUID) {
     guard !transportBusy, !refining, !exporting, libraryFilter != .trash,
       let index = effects.firstIndex(where: { $0.id == id })
     else { return }
+    effectPreparationGeneration = UUID()
     effects[index].bypassed.toggle()
     chain?.setBypass(id: id, bypassed: effects[index].bypassed)
     persistEffects()
@@ -468,18 +499,38 @@ enum RecordingLibraryFilter: Hashable {
   }
 
   private func prepareEditorChain() async {
+    guard !terminating else { return }
     guard !isCapturing else {
+      // After-recording rack edits still belong to the active session's recovery manifest.
       chain = nil
+      persistEffects()
       return
     }
+    let generation = UUID()
+    effectPreparationGeneration = generation
+    let selection = selectedID
+    let playback = playbackGeneration
+    let slots = effects
+    let rate = selected?.settings.sampleRate ?? preferences.settings.sampleRate
+    let channels = selected?.settings.channels ?? preferences.settings.channels
+    chain = nil
     do {
-      chain = try await effectService.build(
-        slots: effects,
-        sampleRate: selected?.settings.sampleRate ?? preferences.settings.sampleRate,
-        channels: selected?.settings.channels ?? preferences.settings.channels)
+      let prepared = try await chainBuilder(slots, rate, channels, false)
+      guard !Task.isCancelled, effectPreparationGeneration == generation, selectedID == selection,
+        playbackGeneration == playback, !isCapturing, !terminating,
+        !exporting, !refining
+      else { return }
+      chain = prepared
+      persistEffects()
+    } catch is CancellationError {
+      // A retired preparation must not publish errors or rewrite a session.
     } catch {
+      guard effectPreparationGeneration == generation, selectedID == selection,
+        playbackGeneration == playback, !isCapturing, !terminating
+      else { return }
       chain = nil
       self.error = error.localizedDescription
+      persistEffects()
     }
   }
 
@@ -514,9 +565,8 @@ enum RecordingLibraryFilter: Hashable {
       let generation = playbackGeneration
       let preparedChain =
         !original && !useProcessed
-        ? try await effectService.build(
-          slots: effects, sampleRate: session.settings.sampleRate,
-          channels: session.settings.channels) : nil
+        ? try await chainBuilder(
+          effects, session.settings.sampleRate, session.settings.channels, false) : nil
       guard canPlay, selectedID == session.id, playbackGeneration == generation else { return }
       chain = preparedChain
       let startTime = playbackPosition >= session.duration ? 0 : playbackPosition
@@ -543,6 +593,7 @@ enum RecordingLibraryFilter: Hashable {
 
   func stopPlayback() {
     playbackGeneration = UUID()
+    effectPreparationGeneration = UUID()
     playback.stop()
     playbackStartTime = 0
   }
@@ -813,24 +864,52 @@ enum RecordingLibraryFilter: Hashable {
     saveEffects()
     exporting = true
     exportProgress = 0
-    defer { exporting = false }
+    let job = UUID()
+    exportJob = job
+    exportCancelled = false
+    defer {
+      exportPreparationTask = nil
+      if exportJob == job {
+        exportJob = nil
+        exporting = false
+        exportCancelled = false
+      }
+    }
     do {
       let snapshot = effects
       let applyChain = request.includeEffects && request.source == .original
-      let exportChain =
-        applyChain
-        ? try await effectService.build(
-          slots: snapshot, sampleRate: request.settings.sampleRate,
-          channels: request.settings.channels, offline: true) : nil
+      let exportChain: EffectChain?
+      if applyChain {
+        let builder = chainBuilder
+        let task = Task {
+          try await builder(snapshot, request.settings.sampleRate, request.settings.channels, true)
+        }
+        exportPreparationTask = task
+        exportChain = try await withTaskCancellationHandler {
+          try await task.value
+        } onCancel: {
+          task.cancel()
+        }
+      } else {
+        exportChain = nil
+      }
+      try Task.checkCancellation()
+      guard exportJob == job, !exportCancelled, !terminating else { throw CancellationError() }
       _ = try await exporter.export(
         session: session, directory: files.directory(session.id), destination: destination,
         request: request, effects: exportChain,
         onProgress: { [weak self] in self?.exportProgress = $0 })
       logger.info("Export completed")
-    } catch is CancellationError {} catch { self.error = error.localizedDescription }
+    } catch is CancellationError {} catch {
+      if !exportCancelled && !terminating { self.error = error.localizedDescription }
+    }
   }
 
-  func cancelExport() { exporter.cancel() }
+  func cancelExport() {
+    exportCancelled = true
+    exportPreparationTask?.cancel()
+    exporter.cancel()
+  }
 
   func setMonitoring(_ enabled: Bool) {
     monitor = enabled
@@ -839,6 +918,8 @@ enum RecordingLibraryFilter: Hashable {
 
   func prepareForTermination() async {
     terminating = true
+    cancelWaveform()
+    effectPreparationGeneration = UUID()
     if phase == .preparing && !isCapturing { phase = .idle }
     cancelExport()
     cancelRefinement()
@@ -854,15 +935,36 @@ enum RecordingLibraryFilter: Hashable {
     saveEffects()
   }
 
-  private func persist(_ session: RecordingSession) {
-    do { try files?.save(session) } catch {
-      let reason = "保存に失敗しました: \(error.localizedDescription)"
-      self.error = reason
-      if let index = sessions.firstIndex(where: { $0.id == session.id }) {
-        sessions[index].warning = combinedWarning(sessions[index].warning, reason)
-      }
-      if isCapturing && phase == .recording { Task { await self.stop() } }
+  private func cancelWaveform() {
+    waveformGeneration = UUID()
+    waveformTask?.cancel()
+    waveformTask = nil
+  }
+
+  private func checkpoint(_ session: RecordingSession) {
+    let id = session.id
+    files?.checkpoint(session) { [weak self] reason in
+      Task { @MainActor in self?.persistenceFailed(id: id, reason: reason) }
     }
+  }
+
+  private func persist(_ session: RecordingSession) {
+    if activeID == session.id && (phase == .recording || phase == .finalizing) {
+      checkpoint(session)
+      return
+    }
+    do { try files?.save(session) } catch {
+      persistenceFailed(id: session.id, reason: error.localizedDescription)
+    }
+  }
+
+  private func persistenceFailed(id: UUID, reason: String) {
+    let message = "保存に失敗しました: \(reason)"
+    self.error = message
+    if let index = sessions.firstIndex(where: { $0.id == id }) {
+      sessions[index].warning = combinedWarning(sessions[index].warning, message)
+    }
+    if activeID == id && phase == .recording { Task { await self.stop() } }
   }
 
   private func combinedWarning(_ existing: String?, _ incoming: String?) -> String? {

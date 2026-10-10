@@ -96,6 +96,7 @@ private final class ExportFileWriter {
   private var finalURLs: [URL] = []
   private var published: [URL] = []
   private var completed = false
+  private let scratch: AVAudioPCMBuffer
 
   init(
     destination: URL, settings: RecordingSettings, format: AVAudioFormat,
@@ -104,6 +105,10 @@ private final class ExportFileWriter {
     self.destination = destination
     self.settings = settings
     self.format = format
+    guard let scratch = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096) else {
+      throw EasyPodError.message("書き出しバッファを確保できませんでした。")
+    }
+    self.scratch = scratch
     let bytesPerFrame = Int64(settings.channels * settings.bitDepth / 8)
     maximumFramesPerPart =
       settings.format == .wav ? (Int64(UInt32.max) - 4096) / bytesPerFrame : Int64.max
@@ -176,8 +181,8 @@ private final class ExportFileWriter {
         try openPart()
       }
       let amount = min(remaining, Int(maximumFramesPerPart - partFrames))
-      guard
-        let slice = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(amount)),
+      let slice = scratch
+      guard amount <= Int(slice.frameCapacity),
         let source = buffer.floatChannelData, let target = slice.floatChannelData
       else { throw EasyPodError.message("書き出しバッファを確保できませんでした。") }
       slice.frameLength = AVAudioFrameCount(amount)

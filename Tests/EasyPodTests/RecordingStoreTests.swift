@@ -375,6 +375,137 @@ import XCTest
     XCTAssertNil(store.selected?.originalTranscript)
     XCTAssertEqual(try files.load().first?.transcript, session.transcript)
   }
+
+  private func effect(_ name: String) -> EffectSlot {
+    EffectSlot(plugin: PluginDescriptor(id: name, name: name, manufacturer: "Fixture", format: .au))
+  }
+
+  func testDelayedRackBuildCannotOverwriteAnotherSessionOrPublishStaleFailure() async throws {
+    let (root, sessions, prefs) = try batchFixture()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let gate = StoreChainGate()
+    defer { gate.retire() }
+    let store = RecordingStore(sessionRoot: root, preferences: prefs, chainBuilder: gate.build)
+    let files = try SessionFileService(root: root)
+    store.select(sessions[0].id)
+    let first = effect("A1")
+    store.effects = [first, effect("A2")]
+    store.saveEffects()
+    let task = Task { await store.moveEffect(first.id, delta: 1) }
+    try await gate.waitForCalls(1)
+    store.select(sessions[1].id)
+    let other = effect("B")
+    store.effects = [other]
+    store.saveEffects()
+    gate.succeed(0)
+    await task.value
+    store.saveEffects()
+    XCTAssertEqual(store.effects.map(\.id), [other.id])
+    XCTAssertEqual(
+      try files.load().first { $0.id == sessions[1].id }?.effects.map(\.id), [other.id])
+
+    store.select(sessions[0].id)
+    let failure = Task { await store.removeEffect(first.id) }
+    try await gate.waitForCalls(2)
+    store.select(sessions[1].id)
+    store.error = nil
+    gate.fail(1)
+    await failure.value
+    XCTAssertNil(store.error)
+    store.saveEffects()
+    XCTAssertEqual(store.effects.map(\.id), [other.id])
+    await store.prepareForTermination()
+  }
+
+  func testLatestRackBuildWinsWhenEarlierPreparationCompletesLast() async throws {
+    let (root, session, prefs) = try fixture()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let gate = StoreChainGate()
+    defer { gate.retire() }
+    let store = RecordingStore(sessionRoot: root, preferences: prefs, chainBuilder: gate.build)
+    let first = effect("First")
+    let second = effect("Second")
+    store.effects = [first, second]
+    store.saveEffects()
+    let older = Task { await store.moveEffect(first.id, delta: 1) }
+    try await gate.waitForCalls(1)
+    let newer = Task { await store.moveEffect(second.id, delta: 1) }
+    try await gate.waitForCalls(2)
+    gate.succeed(1)
+    await newer.value
+    gate.succeed(0)
+    await older.value
+    store.saveEffects()
+    XCTAssertEqual(store.effects.map(\.id), [first.id, second.id])
+    XCTAssertEqual(
+      try SessionFileService(root: root).load().first { $0.id == session.id }?.effects.map(\.id),
+      [first.id, second.id])
+    await store.prepareForTermination()
+  }
+
+  func testCancelDuringExportPreparationPreservesDestinationAndAllowsNextExport() async throws {
+    let (root, session, prefs) = try fixture()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let gate = StoreChainGate()
+    defer { gate.retire() }
+    let store = RecordingStore(sessionRoot: root, preferences: prefs, chainBuilder: gate.build)
+    store.effects = [effect("Export")]
+    let destination = root.appendingPathComponent("export.wav")
+    let previous = Data("existing export".utf8)
+    try previous.write(to: destination)
+    let source = try SessionFileService(root: root).directory(session.id).appendingPathComponent(
+      "source.caf")
+    let original = try Data(contentsOf: source)
+    let task = Task {
+      await store.export(
+        destination: destination, request: ExportRequest(settings: session.settings))
+    }
+    try await gate.waitForCalls(1)
+    XCTAssertTrue(store.exporting)
+    store.cancelExport()
+    gate.succeed(0)
+    await task.value
+    XCTAssertFalse(store.exporting)
+    XCTAssertNil(store.error)
+    XCTAssertEqual(try Data(contentsOf: destination), previous)
+    var request = ExportRequest(settings: session.settings)
+    request.includeEffects = false
+    await store.export(destination: destination, request: request)
+    XCTAssertNil(store.error)
+    XCTAssertEqual(try AVAudioFile(forReading: destination).length, session.frameCount)
+    XCTAssertEqual(try Data(contentsOf: source), original)
+    await store.prepareForTermination()
+  }
+
+  func testMicrophoneUIDMigrationResolvesNewIDAndRejectsReusedNumericID() throws {
+    let domain = "EasyPodUID-\(UUID())"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: domain))
+    defer { defaults.removePersistentDomain(forName: domain) }
+    defaults.set(UInt32(10), forKey: "inputID")
+    let known = CaptureDeviceInfo(
+      id: 10, name: "Microphone", uid: "chosen-input", inputChannels: 1, outputChannels: 0,
+      sampleRate: 48000, isAlive: true)
+    let migrated = PreferencesStore(
+      defaults: defaults, deviceLookup: { $0 == 10 ? known : nil },
+      uidResolver: { $0 == known.uid ? 10 : nil })
+    XCTAssertEqual(migrated.inputUID, known.uid)
+    XCTAssertEqual(try migrated.captureInputID(), 10)
+    let reconnected = CaptureDeviceInfo(
+      id: 20, name: known.name, uid: known.uid, inputChannels: 1, outputChannels: 0,
+      sampleRate: 48000, isAlive: true)
+    let reloaded = PreferencesStore(
+      defaults: defaults, deviceLookup: { $0 == 20 ? reconnected : nil },
+      uidResolver: { $0 == known.uid ? 20 : nil })
+    XCTAssertEqual(reloaded.inputID, 20)
+    XCTAssertEqual(try reloaded.captureInputID(), 20)
+    let absent = PreferencesStore(
+      defaults: defaults, deviceLookup: { _ in known }, uidResolver: { _ in nil })
+    XCTAssertThrowsError(try absent.captureInputID())
+    absent.inputID = nil
+    XCTAssertNil(absent.inputUID)
+    XCTAssertNil(try absent.captureInputID())
+  }
+
 }
 
 private final class StoreRefinementBackend: TranscriptRefinementBackend, Sendable {
@@ -383,4 +514,48 @@ private final class StoreRefinementBackend: TranscriptRefinementBackend, Sendabl
     .init(text: "清書した文字", start: 0, end: Double(samples.count) / Double(sampleRate))
   }
   func close() {}
+}
+
+@MainActor private final class StoreChainGate {
+  private var continuations: [CheckedContinuation<EffectChain, Error>?] = []
+  private var slots: [[EffectSlot]] = []
+
+  func build(_ slots: [EffectSlot], _ rate: Double, _ channels: Int, _ offline: Bool) async throws
+    -> EffectChain
+  {
+    self.slots.append(slots)
+    return try await withCheckedThrowingContinuation { continuations.append($0) }
+  }
+
+  func waitForCalls(_ count: Int) async throws {
+    let deadline = ContinuousClock.now + .seconds(3)
+    while continuations.count < count && ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    XCTAssertEqual(continuations.count, count)
+    guard continuations.count == count else {
+      throw EasyPodError.message("Preparation fixture timed out")
+    }
+  }
+
+  func succeed(_ index: Int) {
+    let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
+    let entries = slots[index].map {
+      EffectChain.Entry(slot: $0, unit: AVAudioUnitEQ(numberOfBands: 1), format: format)
+    }
+    continuations[index]?.resume(returning: EffectChain(entries: entries, format: format))
+    continuations[index] = nil
+  }
+
+  func retire() {
+    for index in continuations.indices {
+      continuations[index]?.resume(throwing: CancellationError())
+      continuations[index] = nil
+    }
+  }
+
+  func fail(_ index: Int) {
+    continuations[index]?.resume(throwing: EasyPodError.message("Stale preparation failed"))
+    continuations[index] = nil
+  }
 }

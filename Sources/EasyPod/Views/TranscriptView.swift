@@ -4,10 +4,9 @@ import SwiftUI
 struct TranscriptView: View {
   @Bindable var store: RecordingStore
   private var segments: [TranscriptSegment] {
-    store.isCapturing ? store.transcription.segments : store.selected?.transcript ?? []
+    store.selected?.transcript ?? []
   }
   private var recognitionStatus: String {
-    if store.isCapturing { return store.transcription.status }
     return store.selected?.transcriptionStatus
       ?? (store.preferences.transcriptionEnabled ? "Nemotron 3.5 · ローカル" : "文字起こし オフ")
   }

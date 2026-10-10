@@ -14,6 +14,7 @@
 #include "pluginterfaces/vst/vstspeaker.h"
 #include "pluginterfaces/gui/iplugview.h"
 #include <atomic>
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -51,6 +52,7 @@ class FixedQueue final : public U::ImplementsNonDestroyable<U::Directly<IParamVa
 public:
     ParamID id = 0;
     int32 count = 0;
+    int32 activeIndex = -1;
     std::array<int32, 32> offsets{};
     std::array<ParamValue, 32> values{};
     ParamID PLUGIN_API getParameterId() override { return id; }
@@ -70,22 +72,38 @@ class FixedChanges final : public U::ImplementsNonDestroyable<U::Directly<IParam
 public:
     std::vector<std::unique_ptr<FixedQueue>> queues;
     std::vector<FixedQueue *> active;
+    std::vector<size_t> ordered;
     int32 used = 0;
     void prepare(const std::vector<ParamID> &ids) {
+        queues.clear(); active.clear(); ordered.clear(); used = 0;
         for (auto id : ids) { auto queue = std::make_unique<FixedQueue>(); queue->id = id; queues.push_back(std::move(queue)); }
         active.resize(ids.size());
+        ordered.resize(ids.size());
+        for (size_t i = 0; i < ids.size(); ++i) ordered[i] = i;
+        std::sort(ordered.begin(), ordered.end(), [&](size_t a, size_t b) { return ids[a] < ids[b]; });
     }
-    void clear() { for (int i = 0; i < used; ++i) active[i]->count = 0; used = 0; }
+    void clear() {
+        for (int i = 0; i < used; ++i) { active[i]->count = 0; active[i]->activeIndex = -1; }
+        used = 0;
+    }
+    IParamValueQueue *addByIndex(size_t preparedIndex, int32 &index) noexcept {
+        if (preparedIndex >= queues.size()) return nullptr;
+        auto queue = queues[preparedIndex].get();
+        if (queue->activeIndex < 0) {
+            queue->activeIndex = used; active[used++] = queue;
+        }
+        index = queue->activeIndex;
+        return queue;
+    }
     int32 PLUGIN_API getParameterCount() override { return used; }
     IParamValueQueue *PLUGIN_API getParameterData(int32 index) override {
         return index >= 0 && index < used ? active[index] : nullptr;
     }
     IParamValueQueue *PLUGIN_API addParameterData(const ParamID &id, int32 &index) override {
-        for (int i = 0; i < used; ++i) if (active[i]->id == id) { index = i; return active[i]; }
-        for (auto &queue : queues) if (queue->id == id) {
-            index = used; active[used++] = queue.get(); return queue.get();
-        }
-        return nullptr;
+        auto found = std::lower_bound(ordered.begin(), ordered.end(), id,
+            [&](size_t position, ParamID value) { return queues[position]->id < value; });
+        if (found == ordered.end() || queues[*found]->id != id) return nullptr;
+        return addByIndex(*found, index);
     }
 };
 
@@ -106,6 +124,7 @@ public:
     IPtr<IPlugView> view;
     __weak NSView *editor = nil;
     std::vector<std::unique_ptr<Parameter>> parameters;
+    std::vector<Parameter *> orderedParameters;
     FixedChanges inputChanges, outputChanges;
     HostProcessData data;
     ProcessContext context{};
@@ -132,8 +151,29 @@ public:
     }
 
     Parameter *parameter(ParamID id) {
-        for (auto &p : parameters) if (p->info.id == id) return p.get();
-        return nullptr;
+        auto found = std::lower_bound(orderedParameters.begin(), orderedParameters.end(), id,
+            [](const Parameter *parameter, ParamID value) { return parameter->info.id < value; });
+        return found != orderedParameters.end() && (*found)->info.id == id ? *found : nullptr;
+    }
+
+    void prepareParameterIndices(const std::vector<ParamID> &ids) {
+        orderedParameters.clear(); orderedParameters.reserve(parameters.size());
+        for (auto &p : parameters) orderedParameters.push_back(p.get());
+        std::sort(orderedParameters.begin(), orderedParameters.end(),
+            [](const Parameter *a, const Parameter *b) { return a->info.id < b->info.id; });
+        inputChanges.prepare(ids); outputChanges.prepare(ids);
+    }
+
+    void refreshControllerValues() {
+        // Controller queries are UI-thread operations. Other owners only publish flags;
+        // the UI timer or a state snapshot consumes the parameter-value flag alone.
+        if (![NSThread isMainThread] || !controller) return;
+        int32 flags = restartFlags.fetch_and(~kParamValuesChanged, std::memory_order_acq_rel);
+        if (!(flags & kParamValuesChanged)) return;
+        for (auto &p : parameters) {
+            p->value.store(controller->getParamNormalized(p->info.id), std::memory_order_release);
+            p->controllerPending.store(false, std::memory_order_release);
+        }
     }
 
     void edit(ParamID id, double value, bool updateController) {
@@ -149,7 +189,9 @@ public:
     tresult PLUGIN_API performEdit(ParamID id, ParamValue value) override { edit(id, value, false); return kResultOk; }
     tresult PLUGIN_API endEdit(ParamID) override { return kResultOk; }
     tresult PLUGIN_API restartComponent(int32 flags) override {
-        restartFlags.fetch_or(flags, std::memory_order_release); return kResultOk;
+        restartFlags.fetch_or(flags, std::memory_order_release);
+        refreshControllerValues();
+        return kResultOk;
     }
     tresult PLUGIN_API resizeView(IPlugView *plugView, ViewRect *rect) override {
         if (!rect || !editor || ![NSThread isMainThread]) return kInvalidArgument;
@@ -215,13 +257,14 @@ public:
                 p->value.store(controller->getParamNormalized(p->info.id)); ids.push_back(p->info.id);
                 parameters.push_back(std::move(p));
             }
+            prepareParameterIndices(ids);
             controller->setComponentHandler(this);
             MemoryStream stream;
             if (component->getState(&stream) == kResultOk) {
                 stream.seek(0, IBStream::kIBSeekSet, nullptr); controller->setComponentState(&stream);
             }
         }
-        inputChanges.prepare(ids); outputChanges.prepare(ids);
+        if (!controller) prepareParameterIndices(ids);
         return true;
     }
 
@@ -277,6 +320,7 @@ public:
     }
 
     NSData *save(NSError **error) {
+        refreshControllerValues();
         if (!beginStateAccess(error)) return nil;
         MemoryStream comp, ctrl;
         auto result = component->getState(&comp);
@@ -351,8 +395,10 @@ public:
         bool suspended = stateAccess.load(std::memory_order_seq_cst);
         if (!suspended) {
             inputChanges.clear(); outputChanges.clear();
-            for (auto &p : parameters) if (p->pending.exchange(false, std::memory_order_acquire)) {
-                int32 index, point; auto q = inputChanges.addParameterData(p->info.id, index);
+            for (size_t parameterIndex = 0; parameterIndex < parameters.size(); ++parameterIndex) {
+                auto &p = parameters[parameterIndex];
+                if (!p->pending.exchange(false, std::memory_order_acquire)) continue;
+                int32 index, point; auto q = inputChanges.addByIndex(parameterIndex, index);
                 if (q) q->addPoint(0, p->value.load(std::memory_order_relaxed), point);
             }
             for (auto event = events; event; event = event->head.next) {
@@ -490,6 +536,7 @@ public:
     [_parameterTimer invalidate];
     _parameterTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) {
         if (!host->controller) return;
+        host->refreshControllerValues();
         for (auto &p : host->parameters) if (p->controllerPending.exchange(false, std::memory_order_acquire)) host->controller->setParamNormalized(p->info.id, p->value.load());
     }];
     return YES;

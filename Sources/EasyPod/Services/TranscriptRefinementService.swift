@@ -118,9 +118,17 @@ private final class TranscriptRefinementWorker {
         }
         let frames = Int(buffer.frameLength)
         let channelCount = Int(buffer.format.channelCount)
-        for channel in 0..<channelCount {
+        if channelCount == 1 {
           for frame in 0..<frames {
-            samples[readCount + frame] += channels[channel][frame] / Float(channelCount)
+            samples[readCount + frame] = channels[0][frame]
+          }
+        } else {
+          let scale = 1 / Float(channelCount)
+          for frame in 0..<frames { samples[readCount + frame] = channels[0][frame] * scale }
+          for channel in 1..<channelCount {
+            for frame in 0..<frames {
+              samples[readCount + frame] += channels[channel][frame] * scale
+            }
           }
         }
         readCount += frames

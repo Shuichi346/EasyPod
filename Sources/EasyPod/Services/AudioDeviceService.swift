@@ -242,6 +242,24 @@ enum AudioDeviceService {
     }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
   }
 
+  static func deviceID(forUID uid: String) -> UInt32? {
+    var address = AudioObjectPropertyAddress(
+      mSelector: kAudioHardwarePropertyTranslateUIDToDevice,
+      mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var qualifier = uid as CFString
+    var id = AudioObjectID(kAudioObjectUnknown)
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    let status = withUnsafePointer(to: &qualifier) {
+      AudioObjectGetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject), &address,
+        UInt32(MemoryLayout<CFString>.size), $0, &size, &id)
+    }
+    guard status == noErr, size == MemoryLayout<AudioObjectID>.size,
+      id != kAudioObjectUnknown
+    else { return nil }
+    return id
+  }
+
   // Capture requires only the chosen input; playback availability never gates original recording.
   static func captureInput(_ selectedID: UInt32?) throws -> CaptureDeviceInfo {
     let id =

@@ -77,6 +77,7 @@ final class CaptureInputPipeline: @unchecked Sendable {
   private var lastInput: ContinuousClock.Instant?
   private var segmentInputFrames: UInt64 = 0
   private var segmentOutputFrames: UInt64 = 0
+  private var processedStartFrame: Int64?
 
   init(
     input: any CaptureInputSource, writer: CaptureWriterHandle, engine: AVAudioEngine,
@@ -157,8 +158,12 @@ final class CaptureInputPipeline: @unchecked Sendable {
       guard !processed || pipeline.state.processingError == 0 else {
         throw EasyPodError.message("録音中エフェクトを準備できませんでした（\(pipeline.state.processingError)）。")
       }
+      guard latencyFrames <= UInt64(Int64.max),
+        pipeline.frame <= Int64.max - Int64(latencyFrames)
+      else { throw EasyPodError.message("エフェクトの遅延が対応範囲外です。") }
       // Both branches are serialized here, so the very next frame is a shared stable boundary.
       ep_capture_segment(pipeline.writer.pointer, pipeline.frame, latencyFrames)
+      pipeline.processedStartFrame = processed ? pipeline.frame + Int64(latencyFrames) : nil
       ep_capture_enable_source(pipeline.writer.pointer, true)
       if processed { ep_capture_enable_processed(pipeline.writer.pointer, true) }
     }
@@ -346,7 +351,14 @@ final class CaptureInputPipeline: @unchecked Sendable {
       ep_capture_status(writer.pointer).processedQueuedFrames < Int64(maximum),
       state.processingError == 0
     {
-      let count = UInt32(min(UInt64(chunk.frameCapacity), remaining - silenceFrames))
+      let queued = UInt64(max(0, ep_capture_status(writer.pointer).processedQueuedFrames))
+      let missing = maximum > queued ? maximum - queued : 0
+      // A short source can end before the latency boundary. Render that pending
+      // latency too, but do not advance DSP past samples that the writer accepts.
+      let pendingLatency = UInt64(max(0, (processedStartFrame ?? frame) - frame))
+      let count = UInt32(
+        min(UInt64(chunk.frameCapacity), remaining - silenceFrames, missing + pendingLatency))
+      guard count > 0 else { break }
       chunk.frameLength = count
       for channel in 0..<Int(chunk.format.channelCount) {
         chunk.floatChannelData![channel].update(repeating: 0, count: Int(count))
