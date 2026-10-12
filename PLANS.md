@@ -52,9 +52,15 @@
 - [x] V18 — Verify bounded checkpoint ordering/failure/finalization, waveform cache/cancellation, and unchanged affected export/library contracts.
 - [x] V19 — Verify UID migration/resolution, runtime preflight, changed-source formatting, integrated build, signing and guarded delivery.
 
-Current: The review repair scope I20–I23 and V16–V19 is complete: 39 focused tests, the native fixture, formatting, build, runtime preflight and guarded signed arm64 delivery passed. Historical I19/V15 evidence and counters remain retained; unrelated I6/V3 stays pending.
+Current: The review repair scope I20–I23 and V16–V19 is complete: 39 focused tests, the native fixture, formatting, build, runtime preflight and guarded signed arm64 delivery passed. The 2026-10-12 publication preparation and separately requested quick Debug build/regression check also completed. Historical I19/V15 evidence and counters remain retained; unrelated I6/V3 stays pending.
 
-Next: None for the review repair scope. Preserve unrelated I6/V3 and exhausted DeepFilter/mixed CLI checks. No fresh microphone, long speech, installed-plugin smoke, or AI UI operation is scheduled.
+Next: None for the completed review repair, publication preparation and quick-check scopes. Preserve unrelated I6/V3 and exhausted DeepFilter/mixed CLI checks. No fresh microphone, long speech, installed-plugin smoke, or AI UI operation is scheduled.
+
+### Publication preparation and requested quick check (2026-10-12)
+
+The local main history was sanitized, cleanup commit `d1bbf97` was retained after aborting a merge with the old remote history, and explicit force-with-lease push succeeded. Remote main matched the local commit. The 12-commit pre-push audit covered 190 unique blobs and found no personal home paths, representative credential patterns or conflict markers. Local settings and recovery backups remained ignored; repository visibility was unchanged.
+
+The user separately requested a brief post-fix build/regression check. Its single bounded Debug `xcodebuild test` invocation passed 14 selected deterministic tests with zero failures, skips or runtime warnings; the build log had no compiler errors/warnings. App/test compilation, deep/strict signature, plist and arm64 executable checks passed. Evidence: `build/quick-check-20261012-1.log` and `.xcresult`. The result reader required access to its protected report cache; this did not rerun tests. No source changes or microphone/native-model/installed-plugin checks occurred. Previous verification counters and pending I6/V3 acceptance were preserved.
 
 ### Review repair execution scope (2026-10-06)
 

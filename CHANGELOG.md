@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Removed machine-specific home paths from the plugin smoke fixture and development documents; excluded personal editor settings, credentials, signing material, recordings and downloaded models from Git while retaining shared Xcode configuration and test audio.
 - Prevented delayed effect preparation from replacing another recording's chain, refreshed VST3 bulk preset values before saving, and preserved effect tails when stopping a paused recording.
 - Cleared stale transcript presentation for recordings with transcription disabled and made export cancellation cover effect preparation.
 - Coalesced recording checkpoints on a serial persistence owner, bounded transcript update delivery, cached/cancelled waveform scans, reused worker audio buffers, and removed quadratic VST3 parameter transfer.
