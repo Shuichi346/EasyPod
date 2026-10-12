@@ -1,6 +1,8 @@
 # Changelog
 
-## Fixed
+## DATE UNKNOWN
+
+### Fixed
 
 - Prevented delayed effect preparation from replacing another recording's chain, refreshed VST3 bulk preset values before saving, and preserved effect tails when stopping a paused recording.
 - Cleared stale transcript presentation for recordings with transcription disabled and made export cancellation cover effect preparation.
@@ -12,7 +14,7 @@
 - Fixed microphone selection and recording-start errors for Apple earphone microphones used as the macOS default input, including switching to and from US-2x2HR. Kept system audio defaults and physical sample rates unchanged.
 - Separated microphone capture from Bluetooth playback using input-only AUHAL, preserving native microphone rates, live effects, and optional monitoring without requiring a combined input/output route.
 
-## Added
+### Added
 
 - Added saved Auto/Japanese/English language selection in transcription settings for both live recognition and offline refinement; retained Japanese as the default.
 - Added the selected flat purple recording/waveform app icon.
@@ -23,7 +25,7 @@
 - Added deletion confirmation and multiple-selection Trash, preserving failed items when only part of a batch moved successfully.
 - Added stopped-recording offline transcript refinement with the configured local model, progress/cancellation, and original-transcript restoration.
 
-## Changed
+### Changed
 
 - Removed machine-specific home paths from the plugin smoke fixture and development documents; excluded personal editor settings, credentials, signing material, recordings and downloaded models from Git while retaining shared Xcode configuration and test audio.
 - Coalesced recording checkpoints on a serial persistence owner, bounded transcript update delivery, cached/cancelled waveform scans, reused worker audio buffers, and removed quadratic VST3 parameter transfer.
