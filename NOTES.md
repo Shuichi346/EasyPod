@@ -1,5 +1,13 @@
 # Development notes
 
+## 2026-10-12
+
+Publication preparation excluded local VS Code/Codex settings, credentials, signing material, session data, recordings and downloaded GGUF models from Git. Local settings were retained; the CMake source directory used the workspace variable. Shared Xcode configuration and both test audio fixtures remained tracked. The plugin smoke fixture resolved the current user's home directory, and development documents used portable paths.
+
+The 11-commit local main history was rewritten to remove editor/Codex settings and personal home paths. Eight Codex checkpoint tree references were sanitized as well. Recovery copies of the original Git database, history bundle and worktree edits were retained in ignored `build/privacy-backup-20261012-171404/`. Git integrity, scanning of local main/checkpoint contents and ignore-rule checks passed. The changed smoke source passed Swift 6 type checking and strict formatting; the existing `scheduleBuffer` asynchronous-alternative warning remained. No installed-plugin smoke, recording or app launch was performed.
+
+GitHub was not updated. The existing remote URL was retained; read-only remote inspection confirmed main still pointed to the pre-rewrite tip, and automatic fetching restored that old remote-tracking history locally. This does not change the sanitized local main branch. Before making the GitHub repository public, commit the cleanup and replace its old history with the sanitized branch. Use an explicit force-with-lease against the pre-rewrite main tip `f6dcf45c51818db60232dcb6d130aca72cb50e03` when updating that branch, rather than merging the old history back. [GitHub's history cleanup guidance](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository) explains remote history replacement.
+
 ## 2026-10-06
 
 The review repairs used session/rack generations to discard stale chain success and failure. Export retained a cancellation-aware preparation task before allocating its render token, so cancellation could not fall through to rendering. Transcript presentation followed the selected session and every new recording reset the previous service generation, including disabled takes.

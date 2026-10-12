@@ -60,7 +60,7 @@ Ensure the recording controls remain comfortably centered, the interface has gen
 
 ## v4 — arrangement of the user-provided reference
 
-Source image: `user-reference-v4.png` (copied from `~/Desktop/M530FRN8.png`). The actual reference was attached to the image generation call.
+Source image: `user-reference-v4.png`. The actual reference was attached to the image generation call.
 
 ```text
 Use case: ui-mockup.

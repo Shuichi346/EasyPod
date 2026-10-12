@@ -28,7 +28,8 @@ struct PluginIntegrationSmoke {
     let vst = PluginDescriptor(
       id: "vst-smoke", name: "DeepFilter Noise Reduction", manufacturer: "DeepFilterNet",
       format: .vst3,
-      path: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Audio/Plug-Ins/VST3/deepfilter-vst.vst3").path,
+      path: FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Audio/Plug-Ins/VST3/deepfilter-vst.vst3").path,
       classID: "4465657046696C7465724E5230303100", version: "0.7.0")
     let chain = try await EffectChainService().build(
       slots: [EffectSlot(plugin: au), EffectSlot(plugin: vst)], sampleRate: 48000, channels: 1,

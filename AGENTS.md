@@ -1,6 +1,7 @@
 # EasyPod development
 
 - Use UTF-8 and English code comments describing behavior and rationale.
+- Keep personal editor/Codex settings, credentials, recordings and models out of Git. Use repository-relative paths or the current user's home directory instead of named personal home paths; retain the shared Xcode scheme and test audio fixtures.
 - `EasyPod.xcodeproj` with the shared EasyPod scheme is authoritative. `project.yml` is its reproducible XcodeGen specification; regenerate after adding sources. Use exposed Xcode MCP builds/diagnostics when the project is open. `script/build_and_run.sh` is the user Run action and CLI fallback. No SwiftPM app packaging.
 - Swift 6 language mode with the installed Swift 6.4 toolchain, arm64, macOS 26+. Keep `ARCHS: arm64` explicitly on both app and test targets in `project.yml`; XcodeGen's macOS app preset overrides project-only architecture settings. App state/UI use MainActor; native handles stay with their serial owner.
 - Keep version/build/category editable through the app target's `MARKETING_VERSION`, `CURRENT_PROJECT_VERSION`, and `INFOPLIST_KEY_LSApplicationCategoryType`; `Resources/Info.plist` expands these settings. Mirror any Xcode edits into `project.yml` before regeneration. Remove `LM_SKIP_METADATA_EXTRACTION` when adding App Intents; it is enabled only while all targets omit them.
